@@ -1,5 +1,2 @@
-export class Hello {
-  public sayHello() {
-    return 'hello, world!';
-  }
-}
+export * from './constructs/rds-database-running-scheduler';
+export * from './stacks/rds-database-running-schedule-stack';
