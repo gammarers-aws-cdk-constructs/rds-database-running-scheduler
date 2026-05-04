@@ -90,7 +90,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1aff7d7d95a1a1e7d69e7366f6c5538a74c99824404e8e6214ddefe364ebed12.zip",
+          "S3Key": "f9020e6bb1bd392deb3d3a8c1fc0fb004c3d8052ac05eba701d5a1da466842bd.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -151,7 +151,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cc609f9ccbc0d31c68c4b99ef9165d38",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961d362e6d44d0a0c6939f44176d674efaa",
             "Version",
           ],
         },
@@ -159,7 +159,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cc609f9ccbc0d31c68c4b99ef9165d38": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961d362e6d44d0a0c6939f44176d674efaa": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -538,7 +538,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule Should match snapshot 
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1aff7d7d95a1a1e7d69e7366f6c5538a74c99824404e8e6214ddefe364ebed12.zip",
+          "S3Key": "f9020e6bb1bd392deb3d3a8c1fc0fb004c3d8052ac05eba701d5a1da466842bd.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -599,7 +599,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule Should match snapshot 
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cc609f9ccbc0d31c68c4b99ef9165d38",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961d362e6d44d0a0c6939f44176d674efaa",
             "Version",
           ],
         },
@@ -607,7 +607,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule Should match snapshot 
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cc609f9ccbc0d31c68c4b99ef9165d38": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961d362e6d44d0a0c6939f44176d674efaa": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -986,7 +986,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1aff7d7d95a1a1e7d69e7366f6c5538a74c99824404e8e6214ddefe364ebed12.zip",
+          "S3Key": "f9020e6bb1bd392deb3d3a8c1fc0fb004c3d8052ac05eba701d5a1da466842bd.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1047,7 +1047,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cc609f9ccbc0d31c68c4b99ef9165d38",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961d362e6d44d0a0c6939f44176d674efaa",
             "Version",
           ],
         },
@@ -1055,7 +1055,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cc609f9ccbc0d31c68c4b99ef9165d38": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961d362e6d44d0a0c6939f44176d674efaa": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
