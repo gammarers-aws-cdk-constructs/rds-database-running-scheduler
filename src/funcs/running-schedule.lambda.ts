@@ -43,9 +43,13 @@ const TRANSITIONING_STATES = [
  * Event payload for scheduled start/stop execution.
  */
 interface ScheduleEvent {
+  /** Scheduler input parameters. */
   Params: {
+    /** Tag key used to discover RDS resources. */
     TagKey: string;
+    /** Tag values matched by the resource discovery query. */
     TagValues: string[];
+    /** Requested operation: start or stop the matched resources. */
     Mode: 'Start' | 'Stop';
   };
 }
@@ -54,10 +58,15 @@ interface ScheduleEvent {
  * Parsed metadata for an RDS resource ARN.
  */
 interface TargetInfo {
+  /** Full ARN of the target RDS resource. */
   targetResource: string;
+  /** DB instance or cluster identifier extracted from the ARN. */
   identifier: string;
+  /** Resource kind: standalone DB instance or Aurora/multi-AZ cluster. */
   type: 'db' | 'cluster';
+  /** AWS account ID extracted from the ARN. */
   account: string;
+  /** AWS region extracted from the ARN (used to select the RDS client). */
   region: string;
 }
 
@@ -65,7 +74,9 @@ interface TargetInfo {
  * Secret shape used to access Slack Web API.
  */
 interface SlackSecret {
+  /** Slack bot or user OAuth token. */
   token: string;
+  /** Slack channel ID or name for notifications. */
   channel: string;
 }
 
@@ -73,19 +84,54 @@ interface SlackSecret {
  * Processing result for a single RDS resource.
  */
 interface ProcessingResult {
+  /** Full ARN of the processed RDS resource. */
   resource: string;
+  /** Final RDS status, or `skipped` when the resource was not found. */
   status: string;
+  /** AWS account ID of the resource. */
   account: string;
+  /** AWS region of the resource. */
   region: string;
+  /** DB instance or cluster identifier. */
   identifier: string;
+  /** Resource kind: standalone DB instance or cluster. */
   type: 'db' | 'cluster';
 }
 
 /**
+ * Maps AWS regions to reusable RDS clients within a single Lambda invocation.
+ * Ensures cross-region resources are targeted with the correct regional endpoint.
+ */
+const rdsClientCache = new Map<string, RDSClient>();
+
+/**
+ * Returns an RDS client configured for the given region.
+ * Clients are cached and reused when multiple resources share the same region.
+ *
+ * @param region AWS region extracted from the target resource ARN.
+ * @returns Cached or newly created RDS client for the region.
+ * @throws {Error} When `region` is empty.
+ */
+const getRdsClient = (region: string): RDSClient => {
+  if (!region) {
+    throw new Error('Region is required to create RDS client');
+  }
+  const cached = rdsClientCache.get(region);
+  if (cached) {
+    return cached;
+  }
+  const client = new RDSClient({ region });
+  rdsClientCache.set(region, client);
+  return client;
+};
+
+/**
  * Parses an RDS ARN and extracts targeting metadata.
  *
+ * Expected format: `arn:aws:rds:{region}:{account}:{type}/{identifier}`.
+ *
  * @param arn Full RDS resource ARN.
- * @returns Parsed resource information used by the workflow.
+ * @returns Parsed resource information including region, account, type, and identifier.
  */
 const parseArn = (arn: string): TargetInfo => {
   const parts = arn.split(':');
@@ -114,12 +160,15 @@ const getStateDisplay = (current: string): { emoji: string; name: string } | und
  * Processes one RDS resource until it reaches a stable state.
  *
  * The function polls status, triggers start/stop when needed, and waits while
- * the resource is transitioning.
+ * the resource is transitioning. Uses a region-specific RDS client derived
+ * from the target ARN so resources outside the Lambda deployment region are
+ * handled correctly.
  *
  * @param context Durable execution context.
  * @param targetResource Target RDS resource ARN.
  * @param mode Requested operation mode.
  * @returns Final processing result including status and resource metadata.
+ * @throws {Error} When the ARN region is missing, the resource reaches an unexpected status, or a DB instance is not found.
  */
 const processing = async (
   context: DurableContext,
@@ -128,7 +177,7 @@ const processing = async (
 ): Promise<ProcessingResult> => {
   const target = await context.step('get-identifier', async () => parseArn(targetResource));
 
-  const rds = new RDSClient({});
+  const rds = getRdsClient(target.region);
   let iteration = 0;
 
   for (;;) {
@@ -221,12 +270,21 @@ const processing = async (
 };
 
 /**
- * Scheduled Lambda handler that finds tagged RDS resources, applies
- * start/stop actions, and posts progress/results to Slack.
+ * Scheduled Lambda handler that discovers tagged RDS resources account-wide,
+ * applies start/stop actions with per-ARN region RDS clients, and posts
+ * progress/results to Slack.
+ *
+ * Resource discovery uses the Lambda deployment region endpoint via
+ * `ResourceGroupsTaggingAPIClient`; returned ARNs may refer to resources in
+ * any region within the same account. RDS API calls use the region embedded
+ * in each ARN.
+ *
+ * Requires `SLACK_SECRET_NAME` environment variable (set by the CDK construct).
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results.
+ * @throws {Error} When required event parameters or environment variables are missing.
  */
 export const handler = withDurableExecution(
   async (event: ScheduleEvent, context: DurableContext) => {
