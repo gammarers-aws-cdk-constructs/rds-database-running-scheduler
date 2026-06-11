@@ -7,7 +7,9 @@
 CDK construct that provisions a durable Lambda workflow and EventBridge schedules to start/stop tagged RDS databases and clusters.
 
 The Lambda discovers matching resources account-wide via the Resource Groups
-Tagging API and controls each resource using the region encoded in its ARN.
+Tagging API, deduplicates Aurora cluster member instances when the parent
+cluster is also tagged, and controls each remaining resource using the
+region encoded in its ARN.
 
 #### Initializers <a name="Initializers" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer"></a>
 
@@ -151,6 +153,9 @@ The tree node.
 ### RDSDatabaseRunningScheduleStack <a name="RDSDatabaseRunningScheduleStack" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStack"></a>
 
 CDK stack that provisions scheduled start/stop control for tagged RDS resources in the deployment account.
+
+Delegates resource discovery, cluster-priority deduplication, and start/stop
+execution to {@link RDSDatabaseRunningScheduler}.
 
 #### Initializers <a name="Initializers" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStack.Initializer"></a>
 
