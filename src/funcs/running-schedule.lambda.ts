@@ -19,6 +19,11 @@ import {
 import { WebClient } from '@slack/web-api';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { SafeEnvGetter } from 'safe-env-getter';
+import {
+  collectClusterKeysFromArns,
+  filterClusterMemberDbs,
+  parseRdsArn,
+} from './running-schedule-targets';
 
 /**
  * Canonical status labels and emojis used in Slack notifications.
@@ -55,22 +60,6 @@ interface ScheduleEvent {
 }
 
 /**
- * Parsed metadata for an RDS resource ARN.
- */
-interface TargetInfo {
-  /** Full ARN of the target RDS resource. */
-  targetResource: string;
-  /** DB instance or cluster identifier extracted from the ARN. */
-  identifier: string;
-  /** Resource kind: standalone DB instance or Aurora/multi-AZ cluster. */
-  type: 'db' | 'cluster';
-  /** AWS account ID extracted from the ARN. */
-  account: string;
-  /** AWS region extracted from the ARN (used to select the RDS client). */
-  region: string;
-}
-
-/**
  * Secret shape used to access Slack Web API.
  */
 interface SlackSecret {
@@ -81,7 +70,7 @@ interface SlackSecret {
 }
 
 /**
- * Processing result for a single RDS resource.
+ * Processing result for a single deduplicated RDS resource.
  */
 interface ProcessingResult {
   /** Full ARN of the processed RDS resource. */
@@ -99,8 +88,10 @@ interface ProcessingResult {
 }
 
 /**
- * Maps AWS regions to reusable RDS clients within a single Lambda invocation.
- * Ensures cross-region resources are targeted with the correct regional endpoint.
+ * In-memory cache of RDS clients keyed by AWS region for the current invocation.
+ *
+ * Ensures cross-region resources are targeted with the correct regional endpoint
+ * while reusing clients when multiple resources share the same region.
  */
 const rdsClientCache = new Map<string, RDSClient>();
 
@@ -126,22 +117,36 @@ const getRdsClient = (region: string): RDSClient => {
 };
 
 /**
- * Parses an RDS ARN and extracts targeting metadata.
+ * Deduplicates discovered RDS ARNs by excluding cluster member DB instances when
+ * their parent cluster is also present in the list.
  *
- * Expected format: `arn:aws:rds:{region}:{account}:{type}/{identifier}`.
+ * Cluster-level start/stop takes priority to avoid conflicting operations on
+ * Aurora resources returned by both `rds:cluster` and `rds:db` type filters.
  *
- * @param arn Full RDS resource ARN.
- * @returns Parsed resource information including region, account, type, and identifier.
+ * @param arns RDS resource ARNs returned by the Resource Groups Tagging API.
+ * @returns Deduplicated ARNs ready for start/stop processing.
+ * @throws {Error} When `DescribeDBInstances` fails for a targeted DB instance.
  */
-const parseArn = (arn: string): TargetInfo => {
-  const parts = arn.split(':');
-  return {
-    targetResource: arn,
-    identifier: parts[6] ?? '',
-    type: (parts[5] === 'cluster' ? 'cluster' : 'db') as 'db' | 'cluster',
-    account: parts[4] ?? '',
-    region: parts[3] ?? '',
-  };
+const deduplicateTargetResources = async (arns: string[]): Promise<string[]> => {
+  const clusterKeys = collectClusterKeysFromArns(arns);
+  if (clusterKeys.size === 0) {
+    return arns;
+  }
+
+  const dbClusterIdentifiers = new Map<string, string | undefined>();
+  for (const arn of arns) {
+    const info = parseRdsArn(arn);
+    if (info.type !== 'db') {
+      continue;
+    }
+    const rds = getRdsClient(info.region);
+    const response = await rds.send(
+      new DescribeDBInstancesCommand({ DBInstanceIdentifier: info.identifier }),
+    );
+    dbClusterIdentifiers.set(arn, response.DBInstances?.[0]?.DBClusterIdentifier);
+  }
+
+  return filterClusterMemberDbs(arns, dbClusterIdentifiers, clusterKeys);
 };
 
 /**
@@ -165,17 +170,17 @@ const getStateDisplay = (current: string): { emoji: string; name: string } | und
  * handled correctly.
  *
  * @param context Durable execution context.
- * @param targetResource Target RDS resource ARN.
+ * @param targetResource Target RDS resource ARN after cluster-priority deduplication.
  * @param mode Requested operation mode.
  * @returns Final processing result including status and resource metadata.
- * @throws {Error} When the ARN region is missing, the resource reaches an unexpected status, or a DB instance is not found.
+ * @throws {Error} When the resource reaches an unexpected status or a DB instance is not found.
  */
 const processing = async (
   context: DurableContext,
   targetResource: string,
   mode: 'Start' | 'Stop',
 ): Promise<ProcessingResult> => {
-  const target = await context.step('get-identifier', async () => parseArn(targetResource));
+  const target = await context.step('get-identifier', async () => parseRdsArn(targetResource));
 
   const rds = getRdsClient(target.region);
   let iteration = 0;
@@ -271,19 +276,21 @@ const processing = async (
 
 /**
  * Scheduled Lambda handler that discovers tagged RDS resources account-wide,
+ * deduplicates Aurora cluster members in favor of cluster-level control,
  * applies start/stop actions with per-ARN region RDS clients, and posts
  * progress/results to Slack.
  *
  * Resource discovery uses the Lambda deployment region endpoint via
  * `ResourceGroupsTaggingAPIClient`; returned ARNs may refer to resources in
- * any region within the same account. RDS API calls use the region embedded
- * in each ARN.
+ * any region within the same account. When both a cluster and its member DB
+ * instances match the tag filter, only the cluster ARN is processed.
+ * RDS API calls use the region embedded in each ARN.
  *
  * Requires `SLACK_SECRET_NAME` environment variable (set by the CDK construct).
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
- * @returns Processed resource count and per-resource results.
+ * @returns Processed resource count and per-resource results after deduplication.
  * @throws {Error} When required event parameters or environment variables are missing.
  */
 export const handler = withDurableExecution(
@@ -299,7 +306,7 @@ export const handler = withDurableExecution(
       return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
     });
 
-    const targetResources = await context.step('get-resources', async () => {
+    const discoveredResources = await context.step('get-resources', async () => {
       const client = new ResourceGroupsTaggingAPIClient({});
       const response = await client.send(
         new GetResourcesCommand({
@@ -308,6 +315,10 @@ export const handler = withDurableExecution(
         }),
       );
       return (response.ResourceTagMappingList ?? []).map((m: ResourceTagMapping) => m.ResourceARN ?? '').filter(Boolean);
+    });
+
+    const targetResources = await context.step('deduplicate-target-resources', async () => {
+      return deduplicateTargetResources(discoveredResources);
     });
 
     if (targetResources.length === 0) {

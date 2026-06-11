@@ -21,6 +21,9 @@ export interface RDSDatabaseRunningScheduleStackProps extends StackProps {
 /**
  * CDK stack that provisions scheduled start/stop control for tagged RDS resources
  * in the deployment account.
+ *
+ * Delegates resource discovery, cluster-priority deduplication, and start/stop
+ * execution to {@link RDSDatabaseRunningScheduler}.
  */
 export class RDSDatabaseRunningScheduleStack extends Stack {
   /**

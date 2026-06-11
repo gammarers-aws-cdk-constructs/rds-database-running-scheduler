@@ -61,7 +61,9 @@ export interface RDSDatabaseRunningSchedulerProps {
  * schedules to start/stop tagged RDS databases and clusters.
  *
  * The Lambda discovers matching resources account-wide via the Resource Groups
- * Tagging API and controls each resource using the region encoded in its ARN.
+ * Tagging API, deduplicates Aurora cluster member instances when the parent
+ * cluster is also tagged, and controls each remaining resource using the
+ * region encoded in its ARN.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**
