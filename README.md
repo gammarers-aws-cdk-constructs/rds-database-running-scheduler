@@ -7,12 +7,13 @@
 
 [![View on Construct Hub](https://constructs.dev/badge?package=rds-database-running-scheduler)](https://constructs.dev/packages/rds-database-running-scheduler)
 
-This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API and controls each resource using the region encoded in its ARN. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.
+This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.
 
 ## Features
 
 - **Tag-based targeting**: Start and stop RDS DB instances and Aurora clusters that match a given tag key and values.
 - **Account-wide discovery**: Finds tagged RDS resources across all regions in the deployment account.
+- **Cluster-priority deduplication**: When tag discovery returns both an Aurora cluster and its member DB instances, only the cluster is processed to avoid conflicting start/stop operations.
 - **Region-aware RDS control**: Creates per-region RDS clients from each resource ARN so cross-region resources are handled correctly.
 - **EventBridge Scheduler**: Cron-based start and stop schedules with configurable timezone, time, and weekdays.
 - **Lambda with Durable Execution**: A single durable run discovers resources by tag, starts or stops them, and polls until they reach the desired state (with timeout).
@@ -69,6 +70,8 @@ new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
 
 Tag your RDS instances or Aurora clusters with the same `tagKey` and one of the `tagValues` so they are included in the schedule.
 
+For Aurora, tagging the cluster is sufficient. If member DB instances inherit the same tag, the Lambda automatically excludes them when the parent cluster is also targeted, so cluster-level start/stop is applied once without conflicting instance-level operations.
+
 The Slack secret in AWS Secrets Manager must contain JSON with `token` and `channel` fields:
 
 ```json
@@ -115,7 +118,7 @@ The Slack secret in AWS Secrets Manager must contain JSON with `token` and `chan
 - **Node.js**: >= 20.0.0
 - **AWS CDK**: ^2.232.0
 - **constructs**: ^10.5.1
-- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, CloudWatch Logs, and Secrets Manager; RDS start/stop permissions for targeted resources; Resource Groups Tagging API access for resource discovery.
+- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, CloudWatch Logs, and Secrets Manager; RDS describe/start/stop permissions for targeted resources; Resource Groups Tagging API access for resource discovery.
 
 ## License
 
