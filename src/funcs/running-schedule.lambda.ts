@@ -18,7 +18,7 @@ import {
 } from '@aws-sdk/client-resource-groups-tagging-api';
 import { WebClient } from '@slack/web-api';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
-import { SafeEnvGetter, SafeEnvType } from 'safe-env-getter';
+import { StrictEnvResolver, StrictEnvType } from 'strict-env-resolver';
 import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
@@ -288,13 +288,17 @@ const processing = async (
  * RDS API calls use the region embedded in each ARN.
  *
  * When `SLACK_SECRET_NAME` is set (by the CDK construct via `notification.slack`),
- * fetches the Slack secret and posts progress/results. When unset or empty,
- * Slack notification steps are skipped.
+ * fetches the Slack secret through the AWS Parameters and Secrets Lambda Extension
+ * (`aws-lambda-secret-fetcher`) and posts progress/results. When unset or empty,
+ * Slack notification steps are skipped. Requires a Lambda runtime with
+ * `AWS_SESSION_TOKEN` and the Params and Secrets extension layer (attached by the
+ * construct when Slack is enabled).
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results after deduplication.
  * @throws {Error} When required event parameters (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
+ * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
 export const handler = withDurableExecution(
   async (event: ScheduleEvent, context: DurableContext) => {
@@ -303,7 +307,7 @@ export const handler = withDurableExecution(
       throw new Error('Invalid event: Params.TagKey, Params.TagValues, Params.Mode are required.');
     }
 
-    const slackSecretName = SafeEnvGetter.getEnv('SLACK_SECRET_NAME', SafeEnvType.String, { default: '' });
+    const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
 
     let slackClient: WebClient | undefined;
     let slackChannel: string | undefined;

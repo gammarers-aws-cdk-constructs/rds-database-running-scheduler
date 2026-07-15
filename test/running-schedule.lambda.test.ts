@@ -16,7 +16,7 @@ import type { Context } from 'aws-lambda';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { mockClient } from 'aws-sdk-client-mock';
 import 'aws-sdk-client-mock-jest';
-import { SafeEnvGetter } from 'safe-env-getter';
+import { StrictEnvResolver } from 'strict-env-resolver';
 import { handler as runningScheduleHandler } from '../src/funcs/running-schedule.lambda';
 
 jest.mock('@aws/durable-execution-sdk-js', () => ({
@@ -32,11 +32,11 @@ jest.mock('aws-lambda-secret-fetcher', () => ({
   },
 }));
 
-jest.mock('safe-env-getter', () => ({
-  SafeEnvGetter: {
-    getEnv: jest.fn(),
+jest.mock('strict-env-resolver', () => ({
+  StrictEnvResolver: {
+    resolve: jest.fn(),
   },
-  SafeEnvType: {
+  StrictEnvType: {
     String: { type: 'string' },
     Number: { type: 'number' },
     Boolean: { type: 'boolean' },
@@ -205,7 +205,7 @@ describe('running-schedule.lambda', () => {
     rdsMock.reset();
     taggingMock.reset();
 
-    (SafeEnvGetter.getEnv as jest.Mock).mockImplementation((key: string) => {
+    (StrictEnvResolver.resolve as jest.Mock).mockImplementation((key: string) => {
       if (key === 'SLACK_SECRET_NAME') {
         return 'example/slack/webhook';
       }
@@ -238,7 +238,7 @@ describe('running-schedule.lambda', () => {
 
   describe('Slack notification disabled', () => {
     beforeEach(() => {
-      (SafeEnvGetter.getEnv as jest.Mock).mockImplementation((key: string) => {
+      (StrictEnvResolver.resolve as jest.Mock).mockImplementation((key: string) => {
         if (key === 'SLACK_SECRET_NAME') {
           return '';
         }
