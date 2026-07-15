@@ -18,7 +18,7 @@ import {
 } from '@aws-sdk/client-resource-groups-tagging-api';
 import { WebClient } from '@slack/web-api';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
-import { SafeEnvGetter } from 'safe-env-getter';
+import { SafeEnvGetter, SafeEnvType } from 'safe-env-getter';
 import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
@@ -60,7 +60,8 @@ interface ScheduleEvent {
 }
 
 /**
- * Secret shape used to access Slack Web API.
+ * Secret shape stored in AWS Secrets Manager for Slack Web API access.
+ * Expected JSON fields: `token` and `channel`.
  */
 interface SlackSecret {
   /** Slack bot or user OAuth token. */
@@ -277,8 +278,8 @@ const processing = async (
 /**
  * Scheduled Lambda handler that discovers tagged RDS resources account-wide,
  * deduplicates Aurora cluster members in favor of cluster-level control,
- * applies start/stop actions with per-ARN region RDS clients, and posts
- * progress/results to Slack.
+ * applies start/stop actions with per-ARN region RDS clients, and optionally
+ * posts progress/results to Slack.
  *
  * Resource discovery uses the Lambda deployment region endpoint via
  * `ResourceGroupsTaggingAPIClient`; returned ARNs may refer to resources in
@@ -286,12 +287,14 @@ const processing = async (
  * instances match the tag filter, only the cluster ARN is processed.
  * RDS API calls use the region embedded in each ARN.
  *
- * Requires `SLACK_SECRET_NAME` environment variable (set by the CDK construct).
+ * When `SLACK_SECRET_NAME` is set (by the CDK construct via `notification.slack`),
+ * fetches the Slack secret and posts progress/results. When unset or empty,
+ * Slack notification steps are skipped.
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results after deduplication.
- * @throws {Error} When required event parameters or environment variables are missing.
+ * @throws {Error} When required event parameters (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
  */
 export const handler = withDurableExecution(
   async (event: ScheduleEvent, context: DurableContext) => {
@@ -299,12 +302,18 @@ export const handler = withDurableExecution(
     if (!params?.TagKey || !params?.TagValues || !params?.Mode) {
       throw new Error('Invalid event: Params.TagKey, Params.TagValues, Params.Mode are required.');
     }
-    // safe get Secrets name from environment variable
-    const slackSecretName = SafeEnvGetter.getEnv('SLACK_SECRET_NAME');
 
-    const slackSecretValue = await context.step('fetch-slack-secret', async () => {
-      return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
-    });
+    const slackSecretName = SafeEnvGetter.getEnv('SLACK_SECRET_NAME', SafeEnvType.String, { default: '' });
+
+    let slackClient: WebClient | undefined;
+    let slackChannel: string | undefined;
+    if (slackSecretName) {
+      const slackSecretValue = await context.step('fetch-slack-secret', async () => {
+        return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
+      });
+      slackClient = new WebClient(slackSecretValue.token);
+      slackChannel = slackSecretValue.channel;
+    }
 
     const discoveredResources = await context.step('get-resources', async () => {
       const client = new ResourceGroupsTaggingAPIClient({});
@@ -325,16 +334,18 @@ export const handler = withDurableExecution(
       return { processed: 0, results: [] };
     }
 
-    const client = new WebClient(slackSecretValue.token);
-    const channel = slackSecretValue.channel;
-
-    // send slack message
-    const slackParentMessageResult = await context.step('post-slack-messages', async () => {
-      return client.chat.postMessage({
-        channel,
-        text: `${params.Mode === 'Start' ? '😆 Starts' : '🥱 Stops'} the scheduled RDS Database or Cluster.`,
+    let slackParentMessageTs: string | undefined;
+    if (slackClient && slackChannel) {
+      const client = slackClient;
+      const channel = slackChannel;
+      const slackParentMessageResult = await context.step('post-slack-messages', async () => {
+        return client.chat.postMessage({
+          channel,
+          text: `${params.Mode === 'Start' ? '😆 Starts' : '🥱 Stops'} the scheduled RDS Database or Cluster.`,
+        });
       });
-    });
+      slackParentMessageTs = slackParentMessageResult?.ts;
+    }
 
     const results = await context.map(
       targetResources,
@@ -344,13 +355,17 @@ export const handler = withDurableExecution(
           if (result.status === 'skipped') {
             return result;
           }
-          // send slack thread message
+          if (!slackClient || !slackChannel) {
+            return result;
+          }
+          const client = slackClient;
+          const channel = slackChannel;
           await childCtx.step('post-slack-child-messages', async () => {
             const display = getStateDisplay(result.status);
 
             return client.chat.postMessage({
               channel,
-              thread_ts: slackParentMessageResult?.ts,
+              thread_ts: slackParentMessageTs,
               attachments: [
                 {
                   color: '#36a64f',

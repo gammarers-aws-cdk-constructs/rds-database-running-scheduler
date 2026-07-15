@@ -36,6 +36,12 @@ jest.mock('safe-env-getter', () => ({
   SafeEnvGetter: {
     getEnv: jest.fn(),
   },
+  SafeEnvType: {
+    String: { type: 'string' },
+    Number: { type: 'number' },
+    Boolean: { type: 'boolean' },
+    Enum: jest.fn((choices: readonly string[]) => ({ type: 'enum', choices })),
+  },
 }));
 
 const mockPostMessage = jest.fn().mockResolvedValue({ ts: '1234567890.123456' });
@@ -199,7 +205,12 @@ describe('running-schedule.lambda', () => {
     rdsMock.reset();
     taggingMock.reset();
 
-    (SafeEnvGetter.getEnv as jest.Mock).mockReturnValue('example/slack/webhook');
+    (SafeEnvGetter.getEnv as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'SLACK_SECRET_NAME') {
+        return 'example/slack/webhook';
+      }
+      throw new Error(`Unexpected env key: ${key}`);
+    });
     (secretFetcher.getSecretValue as jest.Mock).mockResolvedValue({
       token: 'xoxb-test-token',
       channel: 'C12345678',
@@ -221,6 +232,30 @@ describe('running-schedule.lambda', () => {
       const result = await handler(createEvent('Start'), context);
 
       expect(result).toEqual({ processed: 0, results: [] });
+      expect(mockPostMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Slack notification disabled', () => {
+    beforeEach(() => {
+      (SafeEnvGetter.getEnv as jest.Mock).mockImplementation((key: string) => {
+        if (key === 'SLACK_SECRET_NAME') {
+          return '';
+        }
+        throw new Error(`Unexpected env key: ${key}`);
+      });
+    });
+
+    it('skips secret fetch and Slack API calls', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'available' }],
+      });
+
+      const result = await handler(createEvent('Start'), createMockDurableContext());
+
+      expect(result.results[0]?.status).toBe('available');
+      expect(secretFetcher.getSecretValue).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
     });
   });
