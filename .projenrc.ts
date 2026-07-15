@@ -7,7 +7,7 @@ const project = new awscdk.AwsCdkConstructLibrary({
   typescriptVersion: '6.0.x',
   jsiiVersion: '6.0.x',
   name: 'rds-database-running-scheduler',
-  packageManager: javascript.NodePackageManager.YARN_CLASSIC,
+  packageManager: javascript.NodePackageManager.NPM,
   projenrcTs: true,
   repositoryUrl: 'https://github.com/gammarers-aws-cdk-constructs/rds-database-running-scheduler.git',
   description: 'This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.',
