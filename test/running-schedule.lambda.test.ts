@@ -17,6 +17,7 @@ import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { mockClient } from 'aws-sdk-client-mock';
 import 'aws-sdk-client-mock-jest';
 import { SafeEnvGetter } from 'safe-env-getter';
+import { handler as runningScheduleHandler } from '../src/funcs/running-schedule.lambda';
 
 jest.mock('@aws/durable-execution-sdk-js', () => ({
   ...jest.requireActual('@aws/durable-execution-sdk-js'),
@@ -67,6 +68,8 @@ type HandlerFn = (
   event: ScheduleEvent,
   context: DurableContext,
 ) => Promise<{ processed: number; results: ProcessingResult[] }>;
+
+const handler = runningScheduleHandler as unknown as HandlerFn;
 
 interface ProcessingResult {
   resource: string;
@@ -190,14 +193,7 @@ const mockDiscoveredResources = (arns: string[]): void => {
 const rdsMock = mockClient(RDSClient);
 const taggingMock = mockClient(ResourceGroupsTaggingAPIClient);
 
-let handler: HandlerFn;
-
 describe('running-schedule.lambda', () => {
-  beforeAll(async () => {
-    const mod = await import('../src/funcs/running-schedule.lambda');
-    handler = mod.handler as unknown as HandlerFn;
-  });
-
   beforeEach(() => {
     jest.clearAllMocks();
     rdsMock.reset();
