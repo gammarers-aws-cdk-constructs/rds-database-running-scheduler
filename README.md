@@ -7,7 +7,7 @@
 
 [![View on Construct Hub](https://constructs.dev/badge?package=rds-database-running-scheduler)](https://constructs.dev/packages/rds-database-running-scheduler)
 
-This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.
+This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Slack notifications are optional via `notification.slack`. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.
 
 ## Features
 
@@ -17,7 +17,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 - **Region-aware RDS control**: Creates per-region RDS clients from each resource ARN so cross-region resources are handled correctly.
 - **EventBridge Scheduler**: Cron-based start and stop schedules with configurable timezone, time, and weekdays.
 - **Lambda with Durable Execution**: A single durable run discovers resources by tag, starts or stops them, and polls until they reach the desired state (with timeout).
-- **Slack notifications**: Posts schedule progress and per-resource results to Slack using a secret stored in AWS Secrets Manager.
+- **Optional Slack notifications**: Set `notification.slack` to post schedule progress and per-resource results to Slack via Secrets Manager. Omit `notification` (or `notification.slack`) to skip secret lookup, Slack API calls, and related IAM grants.
 - **Supported resources**: RDS DB instances and RDS Aurora clusters.
 
 ## Installation
@@ -38,13 +38,26 @@ yarn add rds-database-running-scheduler
 
 Use the **Construct** `RDSDatabaseRunningScheduler` when adding the scheduler into an existing Stack or any CDK scope.
 
+With Slack notifications:
+
 ```typescript
 import { TimeZone } from 'aws-cdk-lib';
 import { RDSDatabaseRunningScheduler } from 'rds-database-running-scheduler';
 
 new RDSDatabaseRunningScheduler(scope, 'RDSDatabaseRunningScheduler', {
   targetResource: { tagKey: 'WorkHoursRunning', tagValues: ['YES'] },
-  secrets: { slackSecretName: 'example/slack/webhook' },
+  notification: { slack: { secretName: 'example/slack/webhook' } },
+  enableScheduling: true,
+  startSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '50', hour: '7', week: 'MON-FRI' },
+  stopSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '5', hour: '19', week: 'MON-FRI' },
+});
+```
+
+Without Slack notifications, omit `notification` (or omit `notification.slack`):
+
+```typescript
+new RDSDatabaseRunningScheduler(scope, 'RDSDatabaseRunningScheduler', {
+  targetResource: { tagKey: 'WorkHoursRunning', tagValues: ['YES'] },
   enableScheduling: true,
   startSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '50', hour: '7', week: 'MON-FRI' },
   stopSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '5', hour: '19', week: 'MON-FRI' },
@@ -61,7 +74,7 @@ const app = new App();
 
 new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
   targetResource: { tagKey: 'WorkHoursRunning', tagValues: ['YES'] },
-  secrets: { slackSecretName: 'example/slack/webhook' },
+  notification: { slack: { secretName: 'example/slack/webhook' } },
   enableScheduling: true,
   startSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '50', hour: '7', week: 'MON-FRI' },
   stopSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '5', hour: '19', week: 'MON-FRI' },
@@ -72,7 +85,7 @@ Tag your RDS instances or Aurora clusters with the same `tagKey` and one of the 
 
 For Aurora, tagging the cluster is sufficient. If member DB instances inherit the same tag, the Lambda automatically excludes them when the parent cluster is also targeted, so cluster-level start/stop is applied once without conflicting instance-level operations.
 
-The Slack secret in AWS Secrets Manager must contain JSON with `token` and `channel` fields:
+When `notification.slack` is set, the secret in AWS Secrets Manager must contain JSON with `token` and `channel` fields:
 
 ```json
 {
@@ -86,39 +99,45 @@ The Slack secret in AWS Secrets Manager must contain JSON with `token` and `chan
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `targetResource` | `TargetResource` | Yes | Tag key and values used to select RDS resources. |
-| `secrets` | `Secrets` | Yes | Slack configuration. `slackSecretName`: Secrets Manager secret name for Slack (`token` and `channel`). |
-| `enableScheduling` | `boolean` | No | Whether schedules are enabled. Default: `true`. |
+| `notification` | `Notification` | No | Notification channels. Set `notification.slack` to enable Slack. Omit to disable notifications. |
+| `enableScheduling` | `boolean` | No | Whether start and stop schedules are enabled. Default: `true`. |
 | `startSchedule` | `Schedule` | No | Start schedule. Default: 07:50 UTC, MON–FRI. |
 | `stopSchedule` | `Schedule` | No | Stop schedule. Default: 19:05 UTC, MON–FRI. |
 
 ### Schedule
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `timezone` | `TimeZone` | CDK timezone constant (for example `TimeZone.ASIA_TOKYO`, `TimeZone.ETC_UTC`). |
-| `minute` | `string` | Cron minute (for example `'50'`). |
-| `hour` | `string` | Cron hour (for example `'7'`, `'19'`). |
-| `week` | `string` | Cron week day (for example `'MON-FRI'`). |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `timezone` | `TimeZone` | Yes | CDK timezone constant (for example `TimeZone.ASIA_TOKYO`, `TimeZone.ETC_UTC`). |
+| `minute` | `string` | No | Cron minute (for example `'50'`). |
+| `hour` | `string` | No | Cron hour (for example `'7'`, `'19'`). |
+| `week` | `string` | No | Cron week day (for example `'MON-FRI'`). |
 
 ### TargetResource
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `tagKey` | `string` | Tag key to filter RDS resources. |
-| `tagValues` | `string[]` | Tag values to match (resources with any of these values are targeted). |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tagKey` | `string` | Yes | Tag key to filter RDS resources. |
+| `tagValues` | `string[]` | Yes | Tag values to match (resources with any of these values are targeted). |
 
-### Secrets
+### Notification
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `slackSecretName` | `string` | Secrets Manager secret name containing Slack `token` and `channel`. |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `slack` | `SlackNotification` | No | Presence enables Slack notifications. |
+
+### SlackNotification
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `secretName` | `string` | Yes | Secrets Manager secret name containing Slack `token` and `channel`. |
 
 ## Requirements
 
 - **Node.js**: >= 20.0.0
 - **AWS CDK**: ^2.232.0
 - **constructs**: ^10.5.1
-- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, CloudWatch Logs, and Secrets Manager; RDS describe/start/stop permissions for targeted resources; Resource Groups Tagging API access for resource discovery.
+- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, and CloudWatch Logs; RDS describe/start/stop permissions for targeted resources; Resource Groups Tagging API access for resource discovery. Secrets Manager access is required only when `notification.slack` is set.
 
 ## License
 

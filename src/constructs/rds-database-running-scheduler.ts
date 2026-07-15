@@ -33,11 +33,22 @@ export interface TargetResource {
 }
 
 /**
- * Secret names required by the scheduler workflow.
+ * Slack notification settings.
+ * Providing this object (via `notification.slack`) enables Slack notifications.
  */
-export interface Secrets {
-  /** Name of the Slack API secret in AWS Secrets Manager. */
-  readonly slackSecretName: string;
+export interface SlackNotification {
+  /** Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`). */
+  readonly secretName: string;
+}
+
+/**
+ * Notification channel configuration for the scheduler workflow.
+ * Omit a channel (or the whole object) to disable that channel.
+ * Additional channels can be added here in the future without changing top-level props.
+ */
+export interface Notification {
+  /** Optional Slack notification settings. Presence enables Slack. */
+  readonly slack?: SlackNotification;
 }
 
 /**
@@ -46,10 +57,14 @@ export interface Secrets {
 export interface RDSDatabaseRunningSchedulerProps {
   /** Tag filter to select RDS instances and clusters. */
   readonly targetResource: TargetResource;
-  /** Enables or disables both start and stop schedules. */
+  /** Enables or disables both start and stop schedules. Default: `true`. */
   readonly enableScheduling?: boolean;
-  /** Secret references used by the Lambda workflow. */
-  readonly secrets: Secrets;
+  /**
+   * Optional notification channels.
+   * Set `notification.slack` to enable Slack; omit it to skip secret lookup,
+   * Slack API calls, and related IAM grants.
+   */
+  readonly notification?: Notification;
   /** Optional override for stop schedule cron configuration. */
   readonly stopSchedule?: Schedule;
   /** Optional override for start schedule cron configuration. */
@@ -63,7 +78,9 @@ export interface RDSDatabaseRunningSchedulerProps {
  * The Lambda discovers matching resources account-wide via the Resource Groups
  * Tagging API, deduplicates Aurora cluster member instances when the parent
  * cluster is also tagged, and controls each remaining resource using the
- * region encoded in its ARN.
+ * region encoded in its ARN. When `notification.slack` is set, the Lambda
+ * posts progress and results to Slack; otherwise Secrets Manager lookup,
+ * Slack API calls, and related IAM grants are skipped.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**
@@ -71,12 +88,13 @@ export class RDSDatabaseRunningScheduler extends Construct {
    *
    * @param scope Parent construct scope.
    * @param id Construct identifier.
-   * @param props Scheduler configuration.
+   * @param props Scheduler configuration, including optional notification channels.
    */
   constructor(scope: Construct, id: string, props: RDSDatabaseRunningSchedulerProps) {
     super(scope, id);
 
-    const slackSecret = Secret.fromSecretNameV2(this, 'SlackSecret', props.secrets.slackSecretName);
+    const slackSecretName = props.notification?.slack?.secretName;
+    const enableSlackNotification = Boolean(slackSecretName);
 
     // 👇 Lambda Function
     const runningScheduleFunction = new RunningScheduleFunction(this, 'RunningScheduleFunction', {
@@ -90,12 +108,18 @@ export class RDSDatabaseRunningScheduler extends Construct {
         retentionPeriod: Duration.days(1),
       },
       environment: {
-        SLACK_SECRET_NAME: props.secrets.slackSecretName,
+        ...(enableSlackNotification && slackSecretName
+          ? { SLACK_SECRET_NAME: slackSecretName }
+          : {}),
       },
-      paramsAndSecrets: lambda.ParamsAndSecretsLayerVersion.fromVersion(lambda.ParamsAndSecretsVersions.V1_0_103, {
-        cacheSize: 500,
-        logLevel: lambda.ParamsAndSecretsLogLevel.INFO,
-      }),
+      ...(enableSlackNotification
+        ? {
+          paramsAndSecrets: lambda.ParamsAndSecretsLayerVersion.fromVersion(lambda.ParamsAndSecretsVersions.V1_0_103, {
+            cacheSize: 500,
+            logLevel: lambda.ParamsAndSecretsLogLevel.INFO,
+          }),
+        }
+        : {}),
       role: new iam.Role(this, 'RunningScheduleFunctionRole', {
         description: 'A role to control the RDS Database or Cluster.',
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -134,8 +158,10 @@ export class RDSDatabaseRunningScheduler extends Construct {
       ],
       resources: ['*'],
     }));
-    // Grant read access to the Slack secret
-    slackSecret.grantRead(runningScheduleFunction);
+    if (enableSlackNotification && slackSecretName) {
+      const slackSecret = Secret.fromSecretNameV2(this, 'SlackSecret', slackSecretName);
+      slackSecret.grantRead(runningScheduleFunction);
+    }
 
     // https://docs.aws.amazon.com/lambda/latest/dg/durable-getting-started-iac.html
     const runningScheduleFunctionAlias = runningScheduleFunction.addAlias('live');

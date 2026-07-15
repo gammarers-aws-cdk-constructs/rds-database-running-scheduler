@@ -1,6 +1,6 @@
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { RDSDatabaseRunningScheduler, TargetResource, Schedule, Secrets } from '../constructs/rds-database-running-scheduler';
+import { RDSDatabaseRunningScheduler, TargetResource, Schedule, Notification } from '../constructs/rds-database-running-scheduler';
 
 /**
  * Properties for the RDS database running schedule stack.
@@ -8,9 +8,13 @@ import { RDSDatabaseRunningScheduler, TargetResource, Schedule, Secrets } from '
 export interface RDSDatabaseRunningScheduleStackProps extends StackProps {
   /** Tag filter used to select target RDS resources. */
   readonly targetResource: TargetResource;
-  /** Secret references required by the scheduler construct. */
-  readonly secrets: Secrets;
-  /** Enables or disables schedule creation. */
+  /**
+   * Optional notification channels.
+   * Set `notification.slack` to enable Slack; omit it to skip secret lookup,
+   * Slack API calls, and related IAM grants.
+   */
+  readonly notification?: Notification;
+  /** Enables or disables both start and stop schedules. Default: `true`. */
   readonly enableScheduling?: boolean;
   /** Optional cron configuration for stop operations. */
   readonly stopSchedule?: Schedule;
@@ -22,8 +26,8 @@ export interface RDSDatabaseRunningScheduleStackProps extends StackProps {
  * CDK stack that provisions scheduled start/stop control for tagged RDS resources
  * in the deployment account.
  *
- * Delegates resource discovery, cluster-priority deduplication, and start/stop
- * execution to {@link RDSDatabaseRunningScheduler}.
+ * Delegates resource discovery, cluster-priority deduplication, start/stop
+ * execution, and optional Slack notifications to {@link RDSDatabaseRunningScheduler}.
  */
 export class RDSDatabaseRunningScheduleStack extends Stack {
   /**
@@ -31,7 +35,7 @@ export class RDSDatabaseRunningScheduleStack extends Stack {
    *
    * @param scope Parent construct scope.
    * @param id Stack identifier.
-   * @param props Stack configuration.
+   * @param props Stack configuration, including optional notification channels.
    */
   constructor(scope: Construct, id: string, props: RDSDatabaseRunningScheduleStackProps) {
     super(scope, id, props);
@@ -39,9 +43,9 @@ export class RDSDatabaseRunningScheduleStack extends Stack {
     new RDSDatabaseRunningScheduler(this, 'RDSDatabaseRunningScheduler', {
       targetResource: props.targetResource,
       enableScheduling: props.enableScheduling,
+      notification: props.notification,
       stopSchedule: props.stopSchedule,
       startSchedule: props.startSchedule,
-      secrets: props.secrets,
     });
   }
 }
