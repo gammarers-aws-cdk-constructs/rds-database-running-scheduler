@@ -1112,6 +1112,40 @@ Whether termination protection is enabled for this stack.
 
 ## Structs <a name="Structs" id="Structs"></a>
 
+### Notification <a name="Notification" id="rds-database-running-scheduler.Notification"></a>
+
+Notification channel configuration.
+
+Omit a channel (or the whole object) to disable that channel.
+
+#### Initializer <a name="Initializer" id="rds-database-running-scheduler.Notification.Initializer"></a>
+
+```typescript
+import { Notification } from 'rds-database-running-scheduler'
+
+const notification: Notification = { ... }
+```
+
+#### Properties <a name="Properties" id="Properties"></a>
+
+| **Name** | **Type** | **Description** |
+| --- | --- | --- |
+| <code><a href="#rds-database-running-scheduler.Notification.property.slack">slack</a></code> | <code><a href="#rds-database-running-scheduler.SlackNotification">SlackNotification</a></code> | Optional Slack notification settings. |
+
+---
+
+##### `slack`<sup>Optional</sup> <a name="slack" id="rds-database-running-scheduler.Notification.property.slack"></a>
+
+```typescript
+public readonly slack: SlackNotification;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.SlackNotification">SlackNotification</a>
+
+Optional Slack notification settings.
+
+---
+
 ### RDSDatabaseRunningSchedulerProps <a name="RDSDatabaseRunningSchedulerProps" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps"></a>
 
 Properties for the RDS database running scheduler construct.
@@ -1128,23 +1162,11 @@ const rDSDatabaseRunningSchedulerProps: RDSDatabaseRunningSchedulerProps = { ...
 
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.secrets">secrets</a></code> | <code><a href="#rds-database-running-scheduler.Secrets">Secrets</a></code> | Secret references used by the Lambda workflow. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.enableScheduling">enableScheduling</a></code> | <code>boolean</code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for stop schedule cron configuration. |
-
----
-
-##### `secrets`<sup>Required</sup> <a name="secrets" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.secrets"></a>
-
-```typescript
-public readonly secrets: Secrets;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.Secrets">Secrets</a>
-
-Secret references used by the Lambda workflow.
 
 ---
 
@@ -1169,6 +1191,21 @@ public readonly enableScheduling: boolean;
 - *Type:* boolean
 
 Enables or disables both start and stop schedules.
+
+---
+
+##### `notification`<sup>Optional</sup> <a name="notification" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.notification"></a>
+
+```typescript
+public readonly notification: Notification;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.Notification">Notification</a>
+
+Optional notification channels.
+
+Set `notification.slack` to enable Slack; omit it to skip secret lookup,
+Slack API calls, and related IAM grants.
 
 ---
 
@@ -1224,9 +1261,9 @@ const rDSDatabaseRunningScheduleStackProps: RDSDatabaseRunningScheduleStackProps
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.synthesizer">synthesizer</a></code> | <code>aws-cdk-lib.IStackSynthesizer</code> | Synthesis method to use while deploying this stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.tags">tags</a></code> | <code>{[ key: string ]: string}</code> | Tags that will be applied to the Stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.terminationProtection">terminationProtection</a></code> | <code>boolean</code> | Whether to enable termination protection for this stack. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.secrets">secrets</a></code> | <code><a href="#rds-database-running-scheduler.Secrets">Secrets</a></code> | Secret references required by the scheduler construct. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter used to select target RDS resources. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling">enableScheduling</a></code> | <code>boolean</code> | Enables or disables schedule creation. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional cron configuration for start operations. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional cron configuration for stop operations. |
 
@@ -1476,18 +1513,6 @@ Whether to enable termination protection for this stack.
 
 ---
 
-##### `secrets`<sup>Required</sup> <a name="secrets" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.secrets"></a>
-
-```typescript
-public readonly secrets: Secrets;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.Secrets">Secrets</a>
-
-Secret references required by the scheduler construct.
-
----
-
 ##### `targetResource`<sup>Required</sup> <a name="targetResource" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource"></a>
 
 ```typescript
@@ -1509,6 +1534,21 @@ public readonly enableScheduling: boolean;
 - *Type:* boolean
 
 Enables or disables schedule creation.
+
+---
+
+##### `notification`<sup>Optional</sup> <a name="notification" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification"></a>
+
+```typescript
+public readonly notification: Notification;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.Notification">Notification</a>
+
+Optional notification channels.
+
+Set `notification.slack` to enable Slack; omit it to skip secret lookup,
+Slack API calls, and related IAM grants.
 
 ---
 
@@ -1607,35 +1647,37 @@ Weekday field in cron expression.
 
 ---
 
-### Secrets <a name="Secrets" id="rds-database-running-scheduler.Secrets"></a>
+### SlackNotification <a name="SlackNotification" id="rds-database-running-scheduler.SlackNotification"></a>
 
-Secret names required by the scheduler workflow.
+Slack notification settings.
 
-#### Initializer <a name="Initializer" id="rds-database-running-scheduler.Secrets.Initializer"></a>
+Presence of this object enables Slack notifications.
+
+#### Initializer <a name="Initializer" id="rds-database-running-scheduler.SlackNotification.Initializer"></a>
 
 ```typescript
-import { Secrets } from 'rds-database-running-scheduler'
+import { SlackNotification } from 'rds-database-running-scheduler'
 
-const secrets: Secrets = { ... }
+const slackNotification: SlackNotification = { ... }
 ```
 
 #### Properties <a name="Properties" id="Properties"></a>
 
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
-| <code><a href="#rds-database-running-scheduler.Secrets.property.slackSecretName">slackSecretName</a></code> | <code>string</code> | Name of the Slack API secret in AWS Secrets Manager. |
+| <code><a href="#rds-database-running-scheduler.SlackNotification.property.secretName">secretName</a></code> | <code>string</code> | Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`). |
 
 ---
 
-##### `slackSecretName`<sup>Required</sup> <a name="slackSecretName" id="rds-database-running-scheduler.Secrets.property.slackSecretName"></a>
+##### `secretName`<sup>Required</sup> <a name="secretName" id="rds-database-running-scheduler.SlackNotification.property.secretName"></a>
 
 ```typescript
-public readonly slackSecretName: string;
+public readonly secretName: string;
 ```
 
 - *Type:* string
 
-Name of the Slack API secret in AWS Secrets Manager.
+Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`).
 
 ---
 
