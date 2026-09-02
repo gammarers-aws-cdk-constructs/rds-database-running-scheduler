@@ -287,9 +287,9 @@ const processing = async (
  * instances match the tag filter, only the cluster ARN is processed.
  * RDS API calls use the region embedded in each ARN.
  *
- * When `SLACK_SECRET_NAME` is set (by the CDK construct via `notification.slack`),
- * fetches the Slack secret through the AWS Parameters and Secrets Lambda Extension
- * (`aws-lambda-secret-fetcher`) and posts progress/results. When unset or empty,
+ * When `SLACK_SECRET_NAME` is set (by the CDK construct when `notification.slack.enable`
+ * is `true`), fetches the Slack secret through the AWS Parameters and Secrets Lambda
+ * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. When unset or empty,
  * Slack notification steps are skipped. Requires a Lambda runtime with
  * `AWS_SESSION_TOKEN` and the Params and Secrets extension layer (attached by the
  * construct when Slack is enabled).

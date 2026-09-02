@@ -10,8 +10,7 @@ export interface RDSDatabaseRunningScheduleStackProps extends StackProps {
   readonly targetResource: TargetResource;
   /**
    * Optional notification channels.
-   * Set `notification.slack` to enable Slack; omit it to skip secret lookup,
-   * Slack API calls, and related IAM grants.
+   * Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
    */
   readonly notification?: Notification;
   /** Enables or disables both start and stop schedules. Default: `true`. */
@@ -35,7 +34,7 @@ export class RDSDatabaseRunningScheduleStack extends Stack {
    *
    * @param scope Parent construct scope.
    * @param id Stack identifier.
-   * @param props Stack configuration, including optional notification channels.
+   * @param props Stack configuration, including optional Slack notification settings.
    */
   constructor(scope: Construct, id: string, props: RDSDatabaseRunningScheduleStackProps) {
     super(scope, id, props);
