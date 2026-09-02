@@ -9,9 +9,9 @@ CDK construct that provisions a durable Lambda workflow and EventBridge schedule
 The Lambda discovers matching resources account-wide via the Resource Groups
 Tagging API, deduplicates Aurora cluster member instances when the parent
 cluster is also tagged, and controls each remaining resource using the
-region encoded in its ARN. When `notification.slack` is set, the Lambda
-posts progress and results to Slack; otherwise Secrets Manager lookup,
-Slack API calls, and related IAM grants are skipped.
+region encoded in its ARN. When Slack is enabled, the Lambda posts progress
+and results to Slack; otherwise Secrets Manager lookup, Slack API calls,
+and related IAM grants are skipped.
 
 #### Initializers <a name="Initializers" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer"></a>
 
@@ -25,7 +25,7 @@ new RDSDatabaseRunningScheduler(scope: Construct, id: string, props: RDSDatabase
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer.parameter.scope">scope</a></code> | <code>constructs.Construct</code> | Parent construct scope. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer.parameter.id">id</a></code> | <code>string</code> | Construct identifier. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer.parameter.props">props</a></code> | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps">RDSDatabaseRunningSchedulerProps</a></code> | Scheduler configuration, including optional notification channels. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer.parameter.props">props</a></code> | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps">RDSDatabaseRunningSchedulerProps</a></code> | Scheduler configuration, including optional Slack notification settings. |
 
 ---
 
@@ -49,7 +49,7 @@ Construct identifier.
 
 - *Type:* <a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps">RDSDatabaseRunningSchedulerProps</a>
 
-Scheduler configuration, including optional notification channels.
+Scheduler configuration, including optional Slack notification settings.
 
 ---
 
@@ -171,7 +171,7 @@ new RDSDatabaseRunningScheduleStack(scope: Construct, id: string, props: RDSData
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStack.Initializer.parameter.scope">scope</a></code> | <code>constructs.Construct</code> | Parent construct scope. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStack.Initializer.parameter.id">id</a></code> | <code>string</code> | Stack identifier. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStack.Initializer.parameter.props">props</a></code> | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps">RDSDatabaseRunningScheduleStackProps</a></code> | Stack configuration, including optional notification channels. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStack.Initializer.parameter.props">props</a></code> | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps">RDSDatabaseRunningScheduleStackProps</a></code> | Stack configuration, including optional Slack notification settings. |
 
 ---
 
@@ -195,7 +195,7 @@ Stack identifier.
 
 - *Type:* <a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps">RDSDatabaseRunningScheduleStackProps</a>
 
-Stack configuration, including optional notification channels.
+Stack configuration, including optional Slack notification settings.
 
 ---
 
@@ -1147,7 +1147,7 @@ public readonly slack: SlackNotification;
 
 Optional Slack notification settings.
 
-Presence enables Slack.
+Set `slack.enable` to `true` to send messages.
 
 ---
 
@@ -1211,8 +1211,7 @@ public readonly notification: Notification;
 
 Optional notification channels.
 
-Set `notification.slack` to enable Slack; omit it to skip secret lookup,
-Slack API calls, and related IAM grants.
+Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
 
 ---
 
@@ -1556,8 +1555,7 @@ public readonly notification: Notification;
 
 Optional notification channels.
 
-Set `notification.slack` to enable Slack; omit it to skip secret lookup,
-Slack API calls, and related IAM grants.
+Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
 
 ---
 
@@ -1660,7 +1658,7 @@ Weekday field in cron expression.
 
 Slack notification settings.
 
-Providing this object (via `notification.slack`) enables Slack notifications.
+Notifications are off unless `enable` is `true`.
 
 #### Initializer <a name="Initializer" id="rds-database-running-scheduler.SlackNotification.Initializer"></a>
 
@@ -1674,11 +1672,27 @@ const slackNotification: SlackNotification = { ... }
 
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
+| <code><a href="#rds-database-running-scheduler.SlackNotification.property.enable">enable</a></code> | <code>boolean</code> | Whether Slack notifications are enabled. |
 | <code><a href="#rds-database-running-scheduler.SlackNotification.property.secretName">secretName</a></code> | <code>string</code> | Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`). |
 
 ---
 
-##### `secretName`<sup>Required</sup> <a name="secretName" id="rds-database-running-scheduler.SlackNotification.property.secretName"></a>
+##### `enable`<sup>Optional</sup> <a name="enable" id="rds-database-running-scheduler.SlackNotification.property.enable"></a>
+
+```typescript
+public readonly enable: boolean;
+```
+
+- *Type:* boolean
+- *Default:* false
+
+Whether Slack notifications are enabled.
+
+When `false`, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
+
+---
+
+##### `secretName`<sup>Optional</sup> <a name="secretName" id="rds-database-running-scheduler.SlackNotification.property.secretName"></a>
 
 ```typescript
 public readonly secretName: string;
@@ -1687,6 +1701,8 @@ public readonly secretName: string;
 - *Type:* string
 
 Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`).
+
+Required when `enable` is `true`.
 
 ---
 

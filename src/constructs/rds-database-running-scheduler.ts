@@ -1,4 +1,4 @@
-import { Duration, RemovalPolicy, TimeZone } from 'aws-cdk-lib';
+import { Aws, Duration, RemovalPolicy, TimeZone } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -34,11 +34,20 @@ export interface TargetResource {
 
 /**
  * Slack notification settings.
- * Providing this object (via `notification.slack`) enables Slack notifications.
+ * Notifications are off unless `enable` is `true`.
  */
 export interface SlackNotification {
-  /** Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`). */
-  readonly secretName: string;
+  /**
+   * Whether Slack notifications are enabled.
+   * When `false`, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
+   * @default false
+   */
+  readonly enable?: boolean;
+  /**
+   * Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`).
+   * Required when `enable` is `true`.
+   */
+  readonly secretName?: string;
 }
 
 /**
@@ -47,7 +56,7 @@ export interface SlackNotification {
  * Additional channels can be added here in the future without changing top-level props.
  */
 export interface Notification {
-  /** Optional Slack notification settings. Presence enables Slack. */
+  /** Optional Slack notification settings. Set `slack.enable` to `true` to send messages. */
   readonly slack?: SlackNotification;
 }
 
@@ -61,8 +70,7 @@ export interface RDSDatabaseRunningSchedulerProps {
   readonly enableScheduling?: boolean;
   /**
    * Optional notification channels.
-   * Set `notification.slack` to enable Slack; omit it to skip secret lookup,
-   * Slack API calls, and related IAM grants.
+   * Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
    */
   readonly notification?: Notification;
   /** Optional override for stop schedule cron configuration. */
@@ -72,15 +80,62 @@ export interface RDSDatabaseRunningSchedulerProps {
 }
 
 /**
+ * Resolves whether Slack notifications are enabled and which secret to use.
+ *
+ * @param slack Slack channel settings from construct props.
+ * @returns Enabled state with a secret name, or a disabled state.
+ * @throws {Error} When `slack.enable` is `true` but `slack.secretName` is missing.
+ */
+const resolveSlackNotification = (
+  slack: SlackNotification | undefined,
+): { enabled: true; secretName: string } | { enabled: false } => {
+  if (!slack) {
+    return { enabled: false };
+  }
+  if (slack.enable !== true) {
+    return { enabled: false };
+  }
+  if (!slack.secretName) {
+    throw new Error('notification.slack.secretName is required when notification.slack.enable is true');
+  }
+  return { enabled: true, secretName: slack.secretName };
+};
+
+/**
+ * Account-wide RDS DB instance and cluster ARNs used to scope start/stop IAM.
+ * Region is `*` because tagged resources may live outside the stack region.
+ *
+ * @returns RDS resource ARNs for db instances and clusters in this account.
+ */
+const rdsControlResourceArns = (): string[] => [
+  `arn:${Aws.PARTITION}:rds:*:${Aws.ACCOUNT_ID}:db:*`,
+  `arn:${Aws.PARTITION}:rds:*:${Aws.ACCOUNT_ID}:cluster:*`,
+];
+
+/**
+ * IAM condition that allows start/stop only on resources matching the target tag.
+ *
+ * @param targetResource Tag key and values used to select RDS resources.
+ * @returns StringEquals condition keyed by `aws:ResourceTag/<tagKey>`.
+ */
+const rdsResourceTagCondition = (
+  targetResource: TargetResource,
+): Record<string, Record<string, string[]>> => ({
+  StringEquals: {
+    [`aws:ResourceTag/${targetResource.tagKey}`]: targetResource.tagValues,
+  },
+});
+
+/**
  * CDK construct that provisions a durable Lambda workflow and EventBridge
  * schedules to start/stop tagged RDS databases and clusters.
  *
  * The Lambda discovers matching resources account-wide via the Resource Groups
  * Tagging API, deduplicates Aurora cluster member instances when the parent
  * cluster is also tagged, and controls each remaining resource using the
- * region encoded in its ARN. When `notification.slack` is set, the Lambda
- * posts progress and results to Slack; otherwise Secrets Manager lookup,
- * Slack API calls, and related IAM grants are skipped.
+ * region encoded in its ARN. When Slack is enabled, the Lambda posts progress
+ * and results to Slack; otherwise Secrets Manager lookup, Slack API calls,
+ * and related IAM grants are skipped.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**
@@ -88,13 +143,12 @@ export class RDSDatabaseRunningScheduler extends Construct {
    *
    * @param scope Parent construct scope.
    * @param id Construct identifier.
-   * @param props Scheduler configuration, including optional notification channels.
+   * @param props Scheduler configuration, including optional Slack notification settings.
    */
   constructor(scope: Construct, id: string, props: RDSDatabaseRunningSchedulerProps) {
     super(scope, id);
 
-    const slackSecretName = props.notification?.slack?.secretName;
-    const enableSlackNotification = Boolean(slackSecretName);
+    const slackNotification = resolveSlackNotification(props.notification?.slack);
 
     // 👇 Lambda Function
     const runningScheduleFunction = new RunningScheduleFunction(this, 'RunningScheduleFunction', {
@@ -108,11 +162,11 @@ export class RDSDatabaseRunningScheduler extends Construct {
         retentionPeriod: Duration.days(1),
       },
       environment: {
-        ...(enableSlackNotification && slackSecretName
-          ? { SLACK_SECRET_NAME: slackSecretName }
+        ...(slackNotification.enabled
+          ? { SLACK_SECRET_NAME: slackNotification.secretName }
           : {}),
       },
-      ...(enableSlackNotification
+      ...(slackNotification.enabled
         ? {
           paramsAndSecrets: lambda.ParamsAndSecretsLayerVersion.fromVersion(lambda.ParamsAndSecretsVersions.V1_0_103, {
             cacheSize: 500,
@@ -144,22 +198,30 @@ export class RDSDatabaseRunningScheduler extends Construct {
       ],
       resources: ['*'],
     }));
-    // Grant read access to the RDS API
+    // DescribeDBInstances and DescribeDBClusters do not support resource-level IAM.
     runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
-      sid: 'RdsRunningControl',
+      sid: 'RdsDescribe',
       effect: iam.Effect.ALLOW,
       actions: [
         'rds:DescribeDBInstances',
         'rds:DescribeDBClusters',
+      ],
+      resources: ['*'],
+    }));
+    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'RdsRunningControl',
+      effect: iam.Effect.ALLOW,
+      actions: [
         'rds:StartDBInstance',
         'rds:StartDBCluster',
         'rds:StopDBInstance',
         'rds:StopDBCluster',
       ],
-      resources: ['*'],
+      resources: rdsControlResourceArns(),
+      conditions: rdsResourceTagCondition(props.targetResource),
     }));
-    if (enableSlackNotification && slackSecretName) {
-      const slackSecret = Secret.fromSecretNameV2(this, 'SlackSecret', slackSecretName);
+    if (slackNotification.enabled) {
+      const slackSecret = Secret.fromSecretNameV2(this, 'SlackSecret', slackNotification.secretName);
       slackSecret.grantRead(runningScheduleFunction);
     }
 

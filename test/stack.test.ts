@@ -9,6 +9,7 @@ const baseProps = {
   },
   notification: {
     slack: {
+      enable: true,
       secretName: 'example/slack/webhook',
     },
   },
@@ -42,6 +43,53 @@ describe('RDSDatabaseRunningScheduleStack', () => {
       });
     });
 
+    it('Should describe RDS without resource-level restriction', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'RdsDescribe',
+              Action: [
+                'rds:DescribeDBInstances',
+                'rds:DescribeDBClusters',
+              ],
+              Effect: 'Allow',
+              Resource: '*',
+            }),
+          ]),
+        },
+      });
+    });
+
+    it('Should scope RDS start/stop to tagged db and cluster ARNs', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'RdsRunningControl',
+              Action: [
+                'rds:StartDBInstance',
+                'rds:StartDBCluster',
+                'rds:StopDBInstance',
+                'rds:StopDBCluster',
+              ],
+              Effect: 'Allow',
+              Condition: {
+                StringEquals: {
+                  'aws:ResourceTag/WorkHoursRunning': ['YES'],
+                },
+              },
+            }),
+          ]),
+        },
+      });
+      const policies = template.findResources('AWS::IAM::Policy');
+      const serialized = JSON.stringify(policies);
+      expect(serialized).toContain(':db:');
+      expect(serialized).toContain(':cluster:');
+      expect(serialized).toContain('aws:ResourceTag/WorkHoursRunning');
+    });
+
     it('Should grant Secrets Manager read for Slack secret', () => {
       template.hasResourceProperties('AWS::IAM::Policy', {
         PolicyDocument: {
@@ -73,6 +121,22 @@ describe('RDSDatabaseRunningScheduleStack', () => {
     });
   });
 
+  describe('slack.enable true without Slack secret', () => {
+    it('Should throw', () => {
+      const app = new App();
+      expect(() => {
+        new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+          targetResource: baseProps.targetResource,
+          notification: {
+            slack: {
+              enable: true,
+            },
+          },
+        });
+      }).toThrow('notification.slack.secretName is required when notification.slack.enable is true');
+    });
+  });
+
   describe('without Slack notification', () => {
     const app = new App();
     const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
@@ -95,6 +159,63 @@ describe('RDSDatabaseRunningScheduleStack', () => {
 
     it('Should match snapshot', () => {
       expect(template.toJSON()).toMatchSnapshot();
+    });
+  });
+
+  describe('slack.enable false with secretName', () => {
+    const app = new App();
+    const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+      targetResource: baseProps.targetResource,
+      notification: {
+        slack: {
+          enable: false,
+          secretName: 'example/slack/webhook',
+        },
+      },
+    });
+    const template = Template.fromStack(stack);
+
+    it('Should not grant Secrets Manager permissions', () => {
+      const policies = template.findResources('AWS::IAM::Policy');
+      const serialized = JSON.stringify(policies);
+      expect(serialized).not.toContain('secretsmanager:GetSecretValue');
+      expect(serialized).not.toContain('secretsmanager:DescribeSecret');
+    });
+
+    it('Should not set SLACK_SECRET_NAME', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      const serialized = JSON.stringify(functions);
+      expect(serialized).not.toContain('SLACK_SECRET_NAME');
+    });
+
+    it('Should match snapshot', () => {
+      expect(template.toJSON()).toMatchSnapshot();
+    });
+  });
+
+  describe('slack.enable omitted defaults to false', () => {
+    const app = new App();
+    const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+      targetResource: baseProps.targetResource,
+      notification: {
+        slack: {
+          secretName: 'example/slack/webhook',
+        },
+      },
+    });
+    const template = Template.fromStack(stack);
+
+    it('Should not grant Secrets Manager permissions', () => {
+      const policies = template.findResources('AWS::IAM::Policy');
+      const serialized = JSON.stringify(policies);
+      expect(serialized).not.toContain('secretsmanager:GetSecretValue');
+      expect(serialized).not.toContain('secretsmanager:DescribeSecret');
+    });
+
+    it('Should not set SLACK_SECRET_NAME', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      const serialized = JSON.stringify(functions);
+      expect(serialized).not.toContain('SLACK_SECRET_NAME');
     });
   });
 

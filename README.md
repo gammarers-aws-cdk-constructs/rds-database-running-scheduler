@@ -7,7 +7,7 @@
 
 [![View on Construct Hub](https://constructs.dev/badge?package=rds-database-running-scheduler)](https://constructs.dev/packages/rds-database-running-scheduler)
 
-This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Slack notifications are optional via `notification.slack`. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.
+This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Slack notifications are optional via `notification.slack.enable` (default `false`). Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.
 
 ## Features
 
@@ -17,7 +17,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 - **Region-aware RDS control**: Creates per-region RDS clients from each resource ARN so cross-region resources are handled correctly.
 - **EventBridge Scheduler**: Cron-based start and stop schedules with configurable timezone, time, and weekdays.
 - **Lambda with Durable Execution**: A single durable run discovers resources by tag, starts or stops them, and polls until they reach the desired state (with timeout).
-- **Optional Slack notifications**: Set `notification.slack` to post schedule progress and per-resource results to Slack via Secrets Manager. Omit `notification` (or `notification.slack`) to skip secret lookup, Slack API calls, and related IAM grants.
+- **Optional Slack notifications**: Set `notification.slack.enable` to `true` and provide `secretName` to post schedule progress and per-resource results to Slack via Secrets Manager. Leave `enable` unset (default `false`), set it to `false`, or omit `notification.slack` to skip secret lookup, Slack API calls, and related IAM grants.
 - **Supported resources**: RDS DB instances and RDS Aurora clusters.
 
 ## Installation
@@ -46,14 +46,14 @@ import { RDSDatabaseRunningScheduler } from 'rds-database-running-scheduler';
 
 new RDSDatabaseRunningScheduler(scope, 'RDSDatabaseRunningScheduler', {
   targetResource: { tagKey: 'WorkHoursRunning', tagValues: ['YES'] },
-  notification: { slack: { secretName: 'example/slack/webhook' } },
+  notification: { slack: { enable: true, secretName: 'example/slack/webhook' } },
   enableScheduling: true,
   startSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '50', hour: '7', week: 'MON-FRI' },
   stopSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '5', hour: '19', week: 'MON-FRI' },
 });
 ```
 
-Without Slack notifications, omit `notification` (or omit `notification.slack`):
+Without Slack notifications, omit `notification` (or set `notification.slack.enable` to `false`):
 
 ```typescript
 new RDSDatabaseRunningScheduler(scope, 'RDSDatabaseRunningScheduler', {
@@ -74,7 +74,7 @@ const app = new App();
 
 new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
   targetResource: { tagKey: 'WorkHoursRunning', tagValues: ['YES'] },
-  notification: { slack: { secretName: 'example/slack/webhook' } },
+  notification: { slack: { enable: true, secretName: 'example/slack/webhook' } },
   enableScheduling: true,
   startSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '50', hour: '7', week: 'MON-FRI' },
   stopSchedule: { timezone: TimeZone.ASIA_TOKYO, minute: '5', hour: '19', week: 'MON-FRI' },
@@ -85,7 +85,7 @@ Tag your RDS instances or Aurora clusters with the same `tagKey` and one of the 
 
 For Aurora, tagging the cluster is sufficient. If member DB instances inherit the same tag, the Lambda automatically excludes them when the parent cluster is also targeted, so cluster-level start/stop is applied once without conflicting instance-level operations.
 
-When `notification.slack` is set, the secret in AWS Secrets Manager must contain JSON with `token` and `channel` fields:
+When Slack is enabled, the secret in AWS Secrets Manager must contain JSON with `token` and `channel` fields:
 
 ```json
 {
@@ -99,7 +99,7 @@ When `notification.slack` is set, the secret in AWS Secrets Manager must contain
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `targetResource` | `TargetResource` | Yes | Tag key and values used to select RDS resources. |
-| `notification` | `Notification` | No | Notification channels. Set `notification.slack` to enable Slack. Omit to disable notifications. |
+| `notification` | `Notification` | No | Notification channels. Set `notification.slack.enable` to `true` to send Slack messages. |
 | `enableScheduling` | `boolean` | No | Whether start and stop schedules are enabled. Default: `true`. |
 | `startSchedule` | `Schedule` | No | Start schedule. Default: 07:50 UTC, MON–FRI. |
 | `stopSchedule` | `Schedule` | No | Stop schedule. Default: 19:05 UTC, MON–FRI. |
@@ -124,20 +124,21 @@ When `notification.slack` is set, the secret in AWS Secrets Manager must contain
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `slack` | `SlackNotification` | No | Presence enables Slack notifications. |
+| `slack` | `SlackNotification` | No | Slack settings. Omit, or set `enable` to `false`, to disable Slack. |
 
 ### SlackNotification
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `secretName` | `string` | Yes | Secrets Manager secret name containing Slack `token` and `channel`. |
+| `enable` | `boolean` | No | Enable Slack notifications. Default: `false`. When `false`, secret lookup, Slack API calls, and IAM grants are skipped. |
+| `secretName` | `string` | No | Secrets Manager secret name containing Slack `token` and `channel`. Required when `enable` is `true`. |
 
 ## Requirements
 
 - **Node.js**: >= 20.0.0
 - **AWS CDK**: ^2.232.0
 - **constructs**: ^10.5.1
-- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, and CloudWatch Logs; RDS describe/start/stop permissions for targeted resources; Resource Groups Tagging API access for resource discovery. Secrets Manager access is required only when `notification.slack` is set.
+- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, and CloudWatch Logs; RDS describe/start/stop permissions for targeted resources. Start/stop IAM is scoped to DB instance and cluster ARNs in the account and to `aws:ResourceTag` matching `targetResource`. Resource Groups Tagging API access is required for resource discovery. Secrets Manager access is required only when Slack notifications are enabled.
 
 ## License
 
