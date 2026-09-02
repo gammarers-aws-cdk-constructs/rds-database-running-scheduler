@@ -43,6 +43,53 @@ describe('RDSDatabaseRunningScheduleStack', () => {
       });
     });
 
+    it('Should describe RDS without resource-level restriction', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'RdsDescribe',
+              Action: [
+                'rds:DescribeDBInstances',
+                'rds:DescribeDBClusters',
+              ],
+              Effect: 'Allow',
+              Resource: '*',
+            }),
+          ]),
+        },
+      });
+    });
+
+    it('Should scope RDS start/stop to tagged db and cluster ARNs', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'RdsRunningControl',
+              Action: [
+                'rds:StartDBInstance',
+                'rds:StartDBCluster',
+                'rds:StopDBInstance',
+                'rds:StopDBCluster',
+              ],
+              Effect: 'Allow',
+              Condition: {
+                StringEquals: {
+                  'aws:ResourceTag/WorkHoursRunning': ['YES'],
+                },
+              },
+            }),
+          ]),
+        },
+      });
+      const policies = template.findResources('AWS::IAM::Policy');
+      const serialized = JSON.stringify(policies);
+      expect(serialized).toContain(':db:');
+      expect(serialized).toContain(':cluster:');
+      expect(serialized).toContain('aws:ResourceTag/WorkHoursRunning');
+    });
+
     it('Should grant Secrets Manager read for Slack secret', () => {
       template.hasResourceProperties('AWS::IAM::Policy', {
         PolicyDocument: {

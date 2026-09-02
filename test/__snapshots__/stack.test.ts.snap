@@ -90,7 +90,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "2ae6fd89a95afdf717cc2263f62eb6e63788750c78c7c2e487c4adefa386531d.zip",
+          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -151,7 +151,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961def5b0a9085846cc9f0ece3b7f04c82b",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289",
             "Version",
           ],
         },
@@ -159,7 +159,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961def5b0a9085846cc9f0ece3b7f04c82b": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -246,13 +246,60 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
               "Action": [
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBClusters",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "RdsDescribe",
+            },
+            {
+              "Action": [
                 "rds:StartDBInstance",
                 "rds:StartDBCluster",
                 "rds:StopDBInstance",
                 "rds:StopDBCluster",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/WorkHoursRunning": [
+                    "YES",
+                  ],
+                },
+              },
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":db:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":cluster:*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "RdsRunningControl",
             },
             {
@@ -538,7 +585,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "2ae6fd89a95afdf717cc2263f62eb6e63788750c78c7c2e487c4adefa386531d.zip",
+          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -599,7 +646,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961def5b0a9085846cc9f0ece3b7f04c82b",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289",
             "Version",
           ],
         },
@@ -607,7 +654,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961def5b0a9085846cc9f0ece3b7f04c82b": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -694,13 +741,60 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
               "Action": [
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBClusters",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "RdsDescribe",
+            },
+            {
+              "Action": [
                 "rds:StartDBInstance",
                 "rds:StartDBCluster",
                 "rds:StopDBInstance",
                 "rds:StopDBCluster",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/WorkHoursRunning": [
+                    "YES",
+                  ],
+                },
+              },
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":db:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":cluster:*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "RdsRunningControl",
             },
             {
@@ -986,7 +1080,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "2ae6fd89a95afdf717cc2263f62eb6e63788750c78c7c2e487c4adefa386531d.zip",
+          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1047,7 +1141,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961def5b0a9085846cc9f0ece3b7f04c82b",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289",
             "Version",
           ],
         },
@@ -1055,7 +1149,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961def5b0a9085846cc9f0ece3b7f04c82b": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1142,13 +1236,60 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
               "Action": [
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBClusters",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "RdsDescribe",
+            },
+            {
+              "Action": [
                 "rds:StartDBInstance",
                 "rds:StartDBCluster",
                 "rds:StopDBInstance",
                 "rds:StopDBCluster",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/WorkHoursRunning": [
+                    "YES",
+                  ],
+                },
+              },
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":db:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":cluster:*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "RdsRunningControl",
             },
             {
@@ -1367,7 +1508,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "2ae6fd89a95afdf717cc2263f62eb6e63788750c78c7c2e487c4adefa386531d.zip",
+          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1407,7 +1548,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cafbe605d74bb579f27cd6bda32d2da4",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9",
             "Version",
           ],
         },
@@ -1415,7 +1556,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cafbe605d74bb579f27cd6bda32d2da4": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1502,13 +1643,60 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
               "Action": [
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBClusters",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "RdsDescribe",
+            },
+            {
+              "Action": [
                 "rds:StartDBInstance",
                 "rds:StartDBCluster",
                 "rds:StopDBInstance",
                 "rds:StopDBCluster",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/WorkHoursRunning": [
+                    "YES",
+                  ],
+                },
+              },
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":db:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":cluster:*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "RdsRunningControl",
             },
           ],
@@ -1700,7 +1888,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "2ae6fd89a95afdf717cc2263f62eb6e63788750c78c7c2e487c4adefa386531d.zip",
+          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1740,7 +1928,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cafbe605d74bb579f27cd6bda32d2da4",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9",
             "Version",
           ],
         },
@@ -1748,7 +1936,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961cafbe605d74bb579f27cd6bda32d2da4": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1835,13 +2023,60 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
               "Action": [
                 "rds:DescribeDBInstances",
                 "rds:DescribeDBClusters",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "RdsDescribe",
+            },
+            {
+              "Action": [
                 "rds:StartDBInstance",
                 "rds:StartDBCluster",
                 "rds:StopDBInstance",
                 "rds:StopDBCluster",
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/WorkHoursRunning": [
+                    "YES",
+                  ],
+                },
+              },
               "Effect": "Allow",
-              "Resource": "*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":db:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":cluster:*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "RdsRunningControl",
             },
           ],

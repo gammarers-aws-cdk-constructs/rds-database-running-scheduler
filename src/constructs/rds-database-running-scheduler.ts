@@ -1,4 +1,4 @@
-import { Duration, RemovalPolicy, TimeZone } from 'aws-cdk-lib';
+import { Aws, Duration, RemovalPolicy, TimeZone } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -102,6 +102,31 @@ const resolveSlackNotification = (
 };
 
 /**
+ * Account-wide RDS DB instance and cluster ARNs used to scope start/stop IAM.
+ * Region is `*` because tagged resources may live outside the stack region.
+ *
+ * @returns RDS resource ARNs for db instances and clusters in this account.
+ */
+const rdsControlResourceArns = (): string[] => [
+  `arn:${Aws.PARTITION}:rds:*:${Aws.ACCOUNT_ID}:db:*`,
+  `arn:${Aws.PARTITION}:rds:*:${Aws.ACCOUNT_ID}:cluster:*`,
+];
+
+/**
+ * IAM condition that allows start/stop only on resources matching the target tag.
+ *
+ * @param targetResource Tag key and values used to select RDS resources.
+ * @returns StringEquals condition keyed by `aws:ResourceTag/<tagKey>`.
+ */
+const rdsResourceTagCondition = (
+  targetResource: TargetResource,
+): Record<string, Record<string, string[]>> => ({
+  StringEquals: {
+    [`aws:ResourceTag/${targetResource.tagKey}`]: targetResource.tagValues,
+  },
+});
+
+/**
  * CDK construct that provisions a durable Lambda workflow and EventBridge
  * schedules to start/stop tagged RDS databases and clusters.
  *
@@ -173,19 +198,27 @@ export class RDSDatabaseRunningScheduler extends Construct {
       ],
       resources: ['*'],
     }));
-    // Grant read access to the RDS API
+    // DescribeDBInstances and DescribeDBClusters do not support resource-level IAM.
     runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
-      sid: 'RdsRunningControl',
+      sid: 'RdsDescribe',
       effect: iam.Effect.ALLOW,
       actions: [
         'rds:DescribeDBInstances',
         'rds:DescribeDBClusters',
+      ],
+      resources: ['*'],
+    }));
+    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'RdsRunningControl',
+      effect: iam.Effect.ALLOW,
+      actions: [
         'rds:StartDBInstance',
         'rds:StartDBCluster',
         'rds:StopDBInstance',
         'rds:StopDBCluster',
       ],
-      resources: ['*'],
+      resources: rdsControlResourceArns(),
+      conditions: rdsResourceTagCondition(props.targetResource),
     }));
     if (slackNotification.enabled) {
       const slackSecret = Secret.fromSecretNameV2(this, 'SlackSecret', slackNotification.secretName);
