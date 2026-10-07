@@ -32,10 +32,11 @@ export interface TargetInfo {
  */
 export const parseRdsArn = (arn: string): TargetInfo => {
   const parts = arn.split(':');
+  const type = parts[5] === 'cluster' ? 'cluster' : 'db';
   return {
     targetResource: arn,
     identifier: parts[6] ?? '',
-    type: (parts[5] === 'cluster' ? 'cluster' : 'db') as 'db' | 'cluster',
+    type,
     account: parts[4] ?? '',
     region: parts[3] ?? '',
   };

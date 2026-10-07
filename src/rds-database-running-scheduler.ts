@@ -6,7 +6,42 @@ import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as targets from 'aws-cdk-lib/aws-scheduler-targets';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
-import { RunningScheduleFunction } from '../funcs/running-schedule-function';
+import { RunningScheduleFunction } from './funcs/running-schedule-function';
+import {
+  DEFAULT_MAX_WAIT_SECONDS,
+  DEFAULT_WAIT_INTERVAL_SECONDS,
+  MAX_WAIT_SECONDS_LIMIT,
+} from './settings/consts';
+
+/**
+ * Whether Slack notifications are sent.
+ */
+export enum SlackNotificationEnable {
+  /** Send Slack messages. */
+  ENABLED = 'enabled',
+  /** Skip secret lookup, Slack API calls, and related IAM grants. */
+  DISABLED = 'disabled',
+}
+
+/**
+ * Whether the start and stop schedules are active.
+ */
+export enum SchedulingEnable {
+  /** Create the schedules in the enabled state. */
+  ENABLED = 'enabled',
+  /** Create the schedules in the disabled state. */
+  DISABLED = 'disabled',
+}
+
+/**
+ * Whether to post a Slack message when a resource exceeds its wait limit.
+ */
+export enum WaitTimeoutNotification {
+  /** Post a Slack message when the per-resource wait limit is exceeded. */
+  ENABLED = 'enabled',
+  /** Do not post a Slack message when the per-resource wait limit is exceeded. */
+  DISABLED = 'disabled',
+}
 
 /**
  * Cron schedule settings for EventBridge Scheduler.
@@ -34,20 +69,27 @@ export interface TargetResource {
 
 /**
  * Slack notification settings.
- * Notifications are off unless `enable` is `true`.
+ * Notifications are off unless `enable` is {@link SlackNotificationEnable.ENABLED}.
  */
 export interface SlackNotification {
   /**
    * Whether Slack notifications are enabled.
-   * When `false`, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
-   * @default false
+   * When {@link SlackNotificationEnable.DISABLED}, Secrets Manager lookup,
+   * Slack API calls, and related IAM grants are skipped.
+   * @default SlackNotificationEnable.DISABLED
    */
-  readonly enable?: boolean;
+  readonly enable?: SlackNotificationEnable;
   /**
    * Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`).
-   * Required when `enable` is `true`.
+   * Required when `enable` is {@link SlackNotificationEnable.ENABLED}.
    */
   readonly secretName?: string;
+  /**
+   * Whether to post a Slack message when a resource exceeds `resourceWait.maxSeconds`.
+   * Applies only when `enable` is {@link SlackNotificationEnable.ENABLED}.
+   * @default WaitTimeoutNotification.ENABLED
+   */
+  readonly notifyOnWaitTimeout?: WaitTimeoutNotification;
 }
 
 /**
@@ -56,8 +98,30 @@ export interface SlackNotification {
  * Additional channels can be added here in the future without changing top-level props.
  */
 export interface Notification {
-  /** Optional Slack notification settings. Set `slack.enable` to `true` to send messages. */
+  /**
+   * Optional Slack notification settings.
+   * Set `slack.enable` to {@link SlackNotificationEnable.ENABLED} to send messages.
+   */
   readonly slack?: SlackNotification;
+}
+
+/**
+ * Per-resource wait settings for start/stop status checks.
+ */
+export interface ResourceWait {
+  /**
+   * Seconds between status checks while a resource is starting, stopping, or otherwise transitioning.
+   * Must be a positive integer.
+   * @default 60
+   */
+  readonly intervalSeconds?: number;
+  /**
+   * Maximum accumulated wait seconds for one resource to reach a stable state.
+   * Must be a positive integer, greater than or equal to `intervalSeconds`, and at most 6900
+   * so the limit fires before the 2-hour durable execution timeout.
+   * @default 1800
+   */
+  readonly maxSeconds?: number;
 }
 
 /**
@@ -66,13 +130,22 @@ export interface Notification {
 export interface RDSDatabaseRunningSchedulerProps {
   /** Tag filter to select RDS instances and clusters. */
   readonly targetResource: TargetResource;
-  /** Enables or disables both start and stop schedules. Default: `true`. */
-  readonly enableScheduling?: boolean;
+  /**
+   * Enables or disables both start and stop schedules.
+   * @default SchedulingEnable.ENABLED
+   */
+  readonly enableScheduling?: SchedulingEnable;
   /**
    * Optional notification channels.
-   * Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
+   * Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED}
+   * and provide `secretName` to send Slack messages.
    */
   readonly notification?: Notification;
+  /**
+   * Optional per-resource wait settings.
+   * Defaults to a 60-second interval and a 1800-second maximum.
+   */
+  readonly resourceWait?: ResourceWait;
   /** Optional override for stop schedule cron configuration. */
   readonly stopSchedule?: Schedule;
   /** Optional override for start schedule cron configuration. */
@@ -80,25 +153,84 @@ export interface RDSDatabaseRunningSchedulerProps {
 }
 
 /**
+ * Slack settings after applying defaults.
+ * `ENABLED` includes the secret name and the timeout-notification choice.
+ */
+type ResolvedSlackNotification =
+  | {
+    readonly state: SlackNotificationEnable.ENABLED;
+    readonly secretName: string;
+    readonly notifyOnWaitTimeout: WaitTimeoutNotification;
+  }
+  | {
+    readonly state: SlackNotificationEnable.DISABLED;
+  };
+
+/**
  * Resolves whether Slack notifications are enabled and which secret to use.
  *
  * @param slack Slack channel settings from construct props.
  * @returns Enabled state with a secret name, or a disabled state.
- * @throws {Error} When `slack.enable` is `true` but `slack.secretName` is missing.
+ * @throws {Error} When `slack.enable` is {@link SlackNotificationEnable.ENABLED} but `slack.secretName` is missing.
  */
 const resolveSlackNotification = (
   slack: SlackNotification | undefined,
-): { enabled: true; secretName: string } | { enabled: false } => {
+): ResolvedSlackNotification => {
   if (!slack) {
-    return { enabled: false };
+    return { state: SlackNotificationEnable.DISABLED };
   }
-  if (slack.enable !== true) {
-    return { enabled: false };
+  if (slack.enable !== SlackNotificationEnable.ENABLED) {
+    return { state: SlackNotificationEnable.DISABLED };
   }
   if (!slack.secretName) {
-    throw new Error('notification.slack.secretName is required when notification.slack.enable is true');
+    throw new Error('notification.slack.secretName is required when notification.slack.enable is enabled');
   }
-  return { enabled: true, secretName: slack.secretName };
+  return {
+    state: SlackNotificationEnable.ENABLED,
+    secretName: slack.secretName,
+    notifyOnWaitTimeout: slack.notifyOnWaitTimeout ?? WaitTimeoutNotification.ENABLED,
+  };
+};
+
+/**
+ * Validated per-resource wait settings.
+ */
+interface ResolvedResourceWait {
+  /** Seconds between status checks. */
+  readonly intervalSeconds: number;
+  /** Maximum accumulated wait seconds for one resource. */
+  readonly maxSeconds: number;
+}
+
+/**
+ * Validates per-resource wait settings during synthesis.
+ *
+ * Throws a plain `Error` because this runs on the jsii surface. The handler
+ * checks the same limits and throws its own error type.
+ *
+ * @param intervalSeconds Seconds between status checks.
+ * @param maxSeconds Maximum accumulated wait seconds for one resource.
+ * @returns The same values when they are valid.
+ * @throws {Error} When either value is not a positive integer, when `maxSeconds`
+ * is less than `intervalSeconds`, or when `maxSeconds` exceeds {@link MAX_WAIT_SECONDS_LIMIT}.
+ */
+const resolveResourceWait = (
+  intervalSeconds: number,
+  maxSeconds: number,
+): ResolvedResourceWait => {
+  if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
+    throw new Error('resourceWait.intervalSeconds must be a positive integer');
+  }
+  if (!Number.isInteger(maxSeconds) || maxSeconds <= 0) {
+    throw new Error('resourceWait.maxSeconds must be a positive integer');
+  }
+  if (maxSeconds < intervalSeconds) {
+    throw new Error('resourceWait.maxSeconds must be greater than or equal to resourceWait.intervalSeconds');
+  }
+  if (maxSeconds > MAX_WAIT_SECONDS_LIMIT) {
+    throw new Error(`resourceWait.maxSeconds must be less than or equal to ${MAX_WAIT_SECONDS_LIMIT}`);
+  }
+  return { intervalSeconds, maxSeconds };
 };
 
 /**
@@ -133,9 +265,11 @@ const rdsResourceTagCondition = (
  * The Lambda discovers matching resources account-wide via the Resource Groups
  * Tagging API, deduplicates Aurora cluster member instances when the parent
  * cluster is also tagged, and controls each remaining resource using the
- * region encoded in its ARN. When Slack is enabled, the Lambda posts progress
- * and results to Slack; otherwise Secrets Manager lookup, Slack API calls,
- * and related IAM grants are skipped.
+ * region encoded in its ARN. Each resource is checked on a configurable interval
+ * until it reaches a stable state or the per-resource wait limit. When Slack is
+ * enabled, the Lambda posts progress and results to Slack, and can post a timeout
+ * message when the wait limit is exceeded. Otherwise Secrets Manager lookup, Slack
+ * API calls, and related IAM grants are skipped.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**
@@ -149,6 +283,14 @@ export class RDSDatabaseRunningScheduler extends Construct {
     super(scope, id);
 
     const slackNotification = resolveSlackNotification(props.notification?.slack);
+    const resourceWait = resolveResourceWait(
+      props.resourceWait?.intervalSeconds ?? DEFAULT_WAIT_INTERVAL_SECONDS,
+      props.resourceWait?.maxSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
+    );
+    let notifySlackOnWaitTimeout = WaitTimeoutNotification.DISABLED;
+    if (slackNotification.state === SlackNotificationEnable.ENABLED) {
+      notifySlackOnWaitTimeout = slackNotification.notifyOnWaitTimeout;
+    }
 
     // 👇 Lambda Function
     const runningScheduleFunction = new RunningScheduleFunction(this, 'RunningScheduleFunction', {
@@ -162,11 +304,14 @@ export class RDSDatabaseRunningScheduler extends Construct {
         retentionPeriod: Duration.days(1),
       },
       environment: {
-        ...(slackNotification.enabled
+        WAIT_INTERVAL_SECONDS: String(resourceWait.intervalSeconds),
+        MAX_WAIT_SECONDS: String(resourceWait.maxSeconds),
+        NOTIFY_SLACK_ON_WAIT_TIMEOUT: notifySlackOnWaitTimeout === WaitTimeoutNotification.ENABLED ? 'true' : 'false',
+        ...(slackNotification.state === SlackNotificationEnable.ENABLED
           ? { SLACK_SECRET_NAME: slackNotification.secretName }
           : {}),
       },
-      ...(slackNotification.enabled
+      ...(slackNotification.state === SlackNotificationEnable.ENABLED
         ? {
           paramsAndSecrets: lambda.ParamsAndSecretsLayerVersion.fromVersion(lambda.ParamsAndSecretsVersions.V1_0_103, {
             cacheSize: 500,
@@ -220,7 +365,7 @@ export class RDSDatabaseRunningScheduler extends Construct {
       resources: rdsControlResourceArns(),
       conditions: rdsResourceTagCondition(props.targetResource),
     }));
-    if (slackNotification.enabled) {
+    if (slackNotification.state === SlackNotificationEnable.ENABLED) {
       const slackSecret = Secret.fromSecretNameV2(this, 'SlackSecret', slackNotification.secretName);
       slackSecret.grantRead(runningScheduleFunction);
     }
@@ -228,16 +373,11 @@ export class RDSDatabaseRunningScheduler extends Construct {
     // https://docs.aws.amazon.com/lambda/latest/dg/durable-getting-started-iac.html
     const runningScheduleFunctionAlias = runningScheduleFunction.addAlias('live');
 
-    // 👇 Schedule state
-    const scheduleEnabled: boolean = (() => {
-      if (props.enableScheduling === undefined || props.enableScheduling) {
-        return true;
-      } else {
-        return false;
-      }
-    })();
+    // Undefined keeps the schedules enabled. Only an explicit disabled value turns them off.
+    const scheduleEnabled = props.enableScheduling !== SchedulingEnable.DISABLED;
 
-    // Schedule (Durable Functions: Lambda performs tag lookup, export, and polling in one run)
+    // Each schedule invokes the durable Lambda, which discovers tagged resources,
+    // starts or stops them, and waits for a stable state.
     new scheduler.Schedule(this, 'RunningStartSchedule', {
       description: 'running start schedule',
       enabled: scheduleEnabled,
