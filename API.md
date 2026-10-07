@@ -1150,7 +1150,7 @@ public readonly slack: SlackNotification;
 
 Optional Slack notification settings.
 
-Set `slack.enable` to `true` to send messages.
+Set `slack.enable` to {@link SlackNotificationEnable.ENABLED} to send messages.
 
 ---
 
@@ -1171,7 +1171,7 @@ const rDSDatabaseRunningSchedulerProps: RDSDatabaseRunningSchedulerProps = { ...
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.enableScheduling">enableScheduling</a></code> | <code>boolean</code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.enableScheduling">enableScheduling</a></code> | <code><a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a></code> | Enables or disables both start and stop schedules. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
@@ -1194,14 +1194,13 @@ Tag filter to select RDS instances and clusters.
 ##### `enableScheduling`<sup>Optional</sup> <a name="enableScheduling" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.enableScheduling"></a>
 
 ```typescript
-public readonly enableScheduling: boolean;
+public readonly enableScheduling: SchedulingEnable;
 ```
 
-- *Type:* boolean
+- *Type:* <a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a>
+- *Default:* SchedulingEnable.ENABLED
 
 Enables or disables both start and stop schedules.
-
-Default: `true`.
 
 ---
 
@@ -1215,7 +1214,7 @@ public readonly notification: Notification;
 
 Optional notification channels.
 
-Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
+Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED} and provide `secretName` to send Slack messages.
 
 ---
 
@@ -1261,6 +1260,9 @@ Optional override for stop schedule cron configuration.
 
 Properties for the RDS database running schedule stack.
 
+Scheduler fields match {@link RDSDatabaseRunningSchedulerProps}.
+The remaining fields are the standard stack settings from `StackProps`, such as `env`.
+
 #### Initializer <a name="Initializer" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.Initializer"></a>
 
 ```typescript
@@ -1273,6 +1275,12 @@ const rDSDatabaseRunningScheduleStackProps: RDSDatabaseRunningScheduleStackProps
 
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling">enableScheduling</a></code> | <code><a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a></code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for stop schedule cron configuration. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.analyticsReporting">analyticsReporting</a></code> | <code>boolean</code> | Include runtime versioning information in this Stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.crossRegionReferences">crossRegionReferences</a></code> | <code>boolean</code> | Enable this flag to allow native cross region stack references. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.description">description</a></code> | <code>string</code> | A description of the stack. |
@@ -1285,12 +1293,83 @@ const rDSDatabaseRunningScheduleStackProps: RDSDatabaseRunningScheduleStackProps
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.synthesizer">synthesizer</a></code> | <code>aws-cdk-lib.IStackSynthesizer</code> | Synthesis method to use while deploying this stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.tags">tags</a></code> | <code>{[ key: string ]: string}</code> | Tags that will be applied to the Stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.terminationProtection">terminationProtection</a></code> | <code>boolean</code> | Whether to enable termination protection for this stack. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter used to select target RDS resources. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling">enableScheduling</a></code> | <code>boolean</code> | Enables or disables both start and stop schedules. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional cron configuration for start operations. |
-| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional cron configuration for stop operations. |
+
+---
+
+##### `targetResource`<sup>Required</sup> <a name="targetResource" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource"></a>
+
+```typescript
+public readonly targetResource: TargetResource;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.TargetResource">TargetResource</a>
+
+Tag filter to select RDS instances and clusters.
+
+---
+
+##### `enableScheduling`<sup>Optional</sup> <a name="enableScheduling" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling"></a>
+
+```typescript
+public readonly enableScheduling: SchedulingEnable;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a>
+- *Default:* SchedulingEnable.ENABLED
+
+Enables or disables both start and stop schedules.
+
+---
+
+##### `notification`<sup>Optional</sup> <a name="notification" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification"></a>
+
+```typescript
+public readonly notification: Notification;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.Notification">Notification</a>
+
+Optional notification channels.
+
+Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED} and provide `secretName` to send Slack messages.
+
+---
+
+##### `resourceWait`<sup>Optional</sup> <a name="resourceWait" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait"></a>
+
+```typescript
+public readonly resourceWait: ResourceWait;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a>
+
+Optional per-resource wait settings.
+
+Defaults to a 60-second interval and a 1800-second maximum.
+
+---
+
+##### `startSchedule`<sup>Optional</sup> <a name="startSchedule" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule"></a>
+
+```typescript
+public readonly startSchedule: Schedule;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.Schedule">Schedule</a>
+
+Optional override for start schedule cron configuration.
+
+---
+
+##### `stopSchedule`<sup>Optional</sup> <a name="stopSchedule" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule"></a>
+
+```typescript
+public readonly stopSchedule: Schedule;
+```
+
+- *Type:* <a href="#rds-database-running-scheduler.Schedule">Schedule</a>
+
+Optional override for stop schedule cron configuration.
 
 ---
 
@@ -1538,84 +1617,6 @@ Whether to enable termination protection for this stack.
 
 ---
 
-##### `targetResource`<sup>Required</sup> <a name="targetResource" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource"></a>
-
-```typescript
-public readonly targetResource: TargetResource;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.TargetResource">TargetResource</a>
-
-Tag filter used to select target RDS resources.
-
----
-
-##### `enableScheduling`<sup>Optional</sup> <a name="enableScheduling" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling"></a>
-
-```typescript
-public readonly enableScheduling: boolean;
-```
-
-- *Type:* boolean
-
-Enables or disables both start and stop schedules.
-
-Default: `true`.
-
----
-
-##### `notification`<sup>Optional</sup> <a name="notification" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification"></a>
-
-```typescript
-public readonly notification: Notification;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.Notification">Notification</a>
-
-Optional notification channels.
-
-Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
-
----
-
-##### `resourceWait`<sup>Optional</sup> <a name="resourceWait" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait"></a>
-
-```typescript
-public readonly resourceWait: ResourceWait;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a>
-
-Optional per-resource wait settings.
-
-Defaults to a 60-second interval and a 1800-second maximum.
-
----
-
-##### `startSchedule`<sup>Optional</sup> <a name="startSchedule" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule"></a>
-
-```typescript
-public readonly startSchedule: Schedule;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.Schedule">Schedule</a>
-
-Optional cron configuration for start operations.
-
----
-
-##### `stopSchedule`<sup>Optional</sup> <a name="stopSchedule" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule"></a>
-
-```typescript
-public readonly stopSchedule: Schedule;
-```
-
-- *Type:* <a href="#rds-database-running-scheduler.Schedule">Schedule</a>
-
-Optional cron configuration for stop operations.
-
----
-
 ### ResourceWait <a name="ResourceWait" id="rds-database-running-scheduler.ResourceWait"></a>
 
 Per-resource wait settings for start/stop status checks.
@@ -1743,7 +1744,7 @@ Weekday field in cron expression.
 
 Slack notification settings.
 
-Notifications are off unless `enable` is `true`.
+Notifications are off unless `enable` is {@link SlackNotificationEnable.ENABLED}.
 
 #### Initializer <a name="Initializer" id="rds-database-running-scheduler.SlackNotification.Initializer"></a>
 
@@ -1757,8 +1758,8 @@ const slackNotification: SlackNotification = { ... }
 
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
-| <code><a href="#rds-database-running-scheduler.SlackNotification.property.enable">enable</a></code> | <code>boolean</code> | Whether Slack notifications are enabled. |
-| <code><a href="#rds-database-running-scheduler.SlackNotification.property.notifyOnWaitTimeout">notifyOnWaitTimeout</a></code> | <code>boolean</code> | Whether to post a Slack message when a resource exceeds `resourceWait.maxSeconds`. Applies only when `enable` is `true`. |
+| <code><a href="#rds-database-running-scheduler.SlackNotification.property.enable">enable</a></code> | <code><a href="#rds-database-running-scheduler.SlackNotificationEnable">SlackNotificationEnable</a></code> | Whether Slack notifications are enabled. |
+| <code><a href="#rds-database-running-scheduler.SlackNotification.property.notifyOnWaitTimeout">notifyOnWaitTimeout</a></code> | <code><a href="#rds-database-running-scheduler.WaitTimeoutNotification">WaitTimeoutNotification</a></code> | Whether to post a Slack message when a resource exceeds `resourceWait.maxSeconds`. Applies only when `enable` is {@link SlackNotificationEnable.ENABLED}. |
 | <code><a href="#rds-database-running-scheduler.SlackNotification.property.secretName">secretName</a></code> | <code>string</code> | Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`). |
 
 ---
@@ -1766,28 +1767,28 @@ const slackNotification: SlackNotification = { ... }
 ##### `enable`<sup>Optional</sup> <a name="enable" id="rds-database-running-scheduler.SlackNotification.property.enable"></a>
 
 ```typescript
-public readonly enable: boolean;
+public readonly enable: SlackNotificationEnable;
 ```
 
-- *Type:* boolean
-- *Default:* false
+- *Type:* <a href="#rds-database-running-scheduler.SlackNotificationEnable">SlackNotificationEnable</a>
+- *Default:* SlackNotificationEnable.DISABLED
 
 Whether Slack notifications are enabled.
 
-When `false`, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
+When {@link SlackNotificationEnable.DISABLED}, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
 
 ---
 
 ##### `notifyOnWaitTimeout`<sup>Optional</sup> <a name="notifyOnWaitTimeout" id="rds-database-running-scheduler.SlackNotification.property.notifyOnWaitTimeout"></a>
 
 ```typescript
-public readonly notifyOnWaitTimeout: boolean;
+public readonly notifyOnWaitTimeout: WaitTimeoutNotification;
 ```
 
-- *Type:* boolean
-- *Default:* true
+- *Type:* <a href="#rds-database-running-scheduler.WaitTimeoutNotification">WaitTimeoutNotification</a>
+- *Default:* WaitTimeoutNotification.ENABLED
 
-Whether to post a Slack message when a resource exceeds `resourceWait.maxSeconds`. Applies only when `enable` is `true`.
+Whether to post a Slack message when a resource exceeds `resourceWait.maxSeconds`. Applies only when `enable` is {@link SlackNotificationEnable.ENABLED}.
 
 ---
 
@@ -1801,7 +1802,7 @@ public readonly secretName: string;
 
 Name of the Slack API secret in AWS Secrets Manager (`token` and `channel`).
 
-Required when `enable` is `true`.
+Required when `enable` is {@link SlackNotificationEnable.ENABLED}.
 
 ---
 
@@ -1851,4 +1852,86 @@ Tag values matched by the scheduler target query.
 ---
 
 
+
+## Enums <a name="Enums" id="Enums"></a>
+
+### SchedulingEnable <a name="SchedulingEnable" id="rds-database-running-scheduler.SchedulingEnable"></a>
+
+Whether the start and stop schedules are active.
+
+#### Members <a name="Members" id="Members"></a>
+
+| **Name** | **Description** |
+| --- | --- |
+| <code><a href="#rds-database-running-scheduler.SchedulingEnable.ENABLED">ENABLED</a></code> | Create the schedules in the enabled state. |
+| <code><a href="#rds-database-running-scheduler.SchedulingEnable.DISABLED">DISABLED</a></code> | Create the schedules in the disabled state. |
+
+---
+
+##### `ENABLED` <a name="ENABLED" id="rds-database-running-scheduler.SchedulingEnable.ENABLED"></a>
+
+Create the schedules in the enabled state.
+
+---
+
+
+##### `DISABLED` <a name="DISABLED" id="rds-database-running-scheduler.SchedulingEnable.DISABLED"></a>
+
+Create the schedules in the disabled state.
+
+---
+
+
+### SlackNotificationEnable <a name="SlackNotificationEnable" id="rds-database-running-scheduler.SlackNotificationEnable"></a>
+
+Whether Slack notifications are sent.
+
+#### Members <a name="Members" id="Members"></a>
+
+| **Name** | **Description** |
+| --- | --- |
+| <code><a href="#rds-database-running-scheduler.SlackNotificationEnable.ENABLED">ENABLED</a></code> | Send Slack messages. |
+| <code><a href="#rds-database-running-scheduler.SlackNotificationEnable.DISABLED">DISABLED</a></code> | Skip secret lookup, Slack API calls, and related IAM grants. |
+
+---
+
+##### `ENABLED` <a name="ENABLED" id="rds-database-running-scheduler.SlackNotificationEnable.ENABLED"></a>
+
+Send Slack messages.
+
+---
+
+
+##### `DISABLED` <a name="DISABLED" id="rds-database-running-scheduler.SlackNotificationEnable.DISABLED"></a>
+
+Skip secret lookup, Slack API calls, and related IAM grants.
+
+---
+
+
+### WaitTimeoutNotification <a name="WaitTimeoutNotification" id="rds-database-running-scheduler.WaitTimeoutNotification"></a>
+
+Whether to post a Slack message when a resource exceeds its wait limit.
+
+#### Members <a name="Members" id="Members"></a>
+
+| **Name** | **Description** |
+| --- | --- |
+| <code><a href="#rds-database-running-scheduler.WaitTimeoutNotification.ENABLED">ENABLED</a></code> | Post a Slack message when the per-resource wait limit is exceeded. |
+| <code><a href="#rds-database-running-scheduler.WaitTimeoutNotification.DISABLED">DISABLED</a></code> | Do not post a Slack message when the per-resource wait limit is exceeded. |
+
+---
+
+##### `ENABLED` <a name="ENABLED" id="rds-database-running-scheduler.WaitTimeoutNotification.ENABLED"></a>
+
+Post a Slack message when the per-resource wait limit is exceeded.
+
+---
+
+
+##### `DISABLED` <a name="DISABLED" id="rds-database-running-scheduler.WaitTimeoutNotification.DISABLED"></a>
+
+Do not post a Slack message when the per-resource wait limit is exceeded.
+
+---
 
