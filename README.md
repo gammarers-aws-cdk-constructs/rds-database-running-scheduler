@@ -16,8 +16,9 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 - **Cluster-priority deduplication**: When tag discovery returns both an Aurora cluster and its member DB instances, only the cluster is processed to avoid conflicting start/stop operations.
 - **Region-aware RDS control**: Creates per-region RDS clients from each resource ARN so cross-region resources are handled correctly.
 - **EventBridge Scheduler**: Cron-based start and stop schedules with configurable timezone, time, and weekdays.
-- **Lambda with Durable Execution**: A single durable run discovers resources by tag, starts or stops them, and polls until they reach the desired state (with timeout).
-- **Optional Slack notifications**: Set `notification.slack.enable` to `true` and provide `secretName` to post schedule progress and per-resource results to Slack via Secrets Manager. Leave `enable` unset (default `false`), set it to `false`, or omit `notification.slack` to skip secret lookup, Slack API calls, and related IAM grants.
+- **Lambda with Durable Execution**: A single durable run discovers resources by tag, starts or stops them, and waits until they reach the desired state or the per-resource wait limit.
+- **Configurable wait**: Set `resourceWait.intervalSeconds` and `resourceWait.maxSeconds` to control how often each resource is checked and how long the function waits before timing out. Defaults are 60 seconds and 1800 seconds.
+- **Optional Slack notifications**: Set `notification.slack.enable` to `true` and provide `secretName` to post schedule progress and per-resource results to Slack via Secrets Manager. Leave `enable` unset (default `false`), set it to `false`, or omit `notification.slack` to skip secret lookup, Slack API calls, and related IAM grants. When Slack is enabled, a timeout posts a message unless `notification.slack.notifyOnWaitTimeout` is `false`.
 - **Supported resources**: RDS DB instances and RDS Aurora clusters.
 
 ## Installation
@@ -100,6 +101,7 @@ When Slack is enabled, the secret in AWS Secrets Manager must contain JSON with 
 |--------|------|----------|-------------|
 | `targetResource` | `TargetResource` | Yes | Tag key and values used to select RDS resources. |
 | `notification` | `Notification` | No | Notification channels. Set `notification.slack.enable` to `true` to send Slack messages. |
+| `resourceWait` | `ResourceWait` | No | Per-resource status-check interval and maximum wait. Default: 60-second interval, 1800-second maximum. |
 | `enableScheduling` | `boolean` | No | Whether start and stop schedules are enabled. Default: `true`. |
 | `startSchedule` | `Schedule` | No | Start schedule. Default: 07:50 UTC, MON–FRI. |
 | `stopSchedule` | `Schedule` | No | Stop schedule. Default: 19:05 UTC, MON–FRI. |
@@ -132,6 +134,14 @@ When Slack is enabled, the secret in AWS Secrets Manager must contain JSON with 
 |-------|------|----------|-------------|
 | `enable` | `boolean` | No | Enable Slack notifications. Default: `false`. When `false`, secret lookup, Slack API calls, and IAM grants are skipped. |
 | `secretName` | `string` | No | Secrets Manager secret name containing Slack `token` and `channel`. Required when `enable` is `true`. |
+| `notifyOnWaitTimeout` | `boolean` | No | Post a Slack message when a resource exceeds `resourceWait.maxSeconds`. Applies only when `enable` is `true`. Default: `true`. |
+
+### ResourceWait
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `intervalSeconds` | `number` | No | Seconds between status checks. Positive integer. Default: `60`. |
+| `maxSeconds` | `number` | No | Maximum accumulated wait seconds for one resource. Positive integer, greater than or equal to `intervalSeconds`, and at most `6900`. Default: `1800`. |
 
 ## Requirements
 
