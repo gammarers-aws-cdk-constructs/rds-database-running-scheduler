@@ -31,7 +31,7 @@ import {
   resolveResourceWait,
   shouldContinueWaitLoop,
   type WaitLoopSignal,
-} from './running-schedule-wait';
+} from '../core/resource-wait';
 
 /**
  * Canonical status labels and emojis used in Slack notifications.
@@ -158,6 +158,25 @@ const getStateDisplay = (current: string): { emoji: string; name: string } | und
   return found ? { emoji: found.emoji, name: found.name } : undefined;
 };
 
+/**
+ * Reads an error name from an unknown thrown value.
+ *
+ * @param err Value caught from an AWS SDK call.
+ * @returns The error name when it is a string, otherwise an empty string.
+ */
+const readErrorName = (err: unknown): string => {
+  if (typeof err !== 'object' || err === null) {
+    return '';
+  }
+  if (!('name' in err)) {
+    return '';
+  }
+  if (typeof err.name !== 'string') {
+    return '';
+  }
+  return err.name;
+};
+
 
 /**
  * Processes one RDS resource until it reaches a stable state or the wait budget is spent.
@@ -211,19 +230,19 @@ const processing = async (
         if (current == null) {
           throw new Error(`DB instance not found: ${target.identifier}`);
         }
-        return { current, type: target.type as string, identifier: target.identifier };
+        return { current, type: target.type, identifier: target.identifier };
       }
       try {
         const res = await rds.send(new DescribeDBClustersCommand({ DBClusterIdentifier: target.identifier }));
         const current = res.DBClusters?.[0]?.Status;
         if (current == null) {
-          return { current: 'not-found', type: target.type as string, identifier: target.identifier };
+          return { current: 'not-found', type: target.type, identifier: target.identifier };
         }
-        return { current, type: target.type as string, identifier: target.identifier };
+        return { current, type: target.type, identifier: target.identifier };
       } catch (err: unknown) {
-        const code = err && typeof err === 'object' && 'name' in err ? (err as { name: string }).name : '';
+        const code = readErrorName(err);
         if (code === 'DBClusterNotFoundFault' || code === 'DbClusterNotFoundException') {
-          return { current: 'not-found', type: target.type as string, identifier: target.identifier };
+          return { current: 'not-found', type: target.type, identifier: target.identifier };
         }
         throw err;
       }

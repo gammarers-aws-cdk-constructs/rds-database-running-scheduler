@@ -6,7 +6,7 @@ import {
   resolveResourceWait,
   shouldContinueWaitLoop,
   TRANSITIONING_STATES,
-} from '../src/funcs/running-schedule-wait';
+} from '../src/core/resource-wait';
 
 describe('decideResourceAction', () => {
   it.each([

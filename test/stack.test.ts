@@ -1,6 +1,11 @@
 import { App, TimeZone } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { RDSDatabaseRunningScheduleStack } from '../src';
+import {
+  RDSDatabaseRunningScheduleStack,
+  SchedulingEnable,
+  SlackNotificationEnable,
+  WaitTimeoutNotification,
+} from '../src';
 
 const baseProps = {
   targetResource: {
@@ -9,7 +14,7 @@ const baseProps = {
   },
   notification: {
     slack: {
-      enable: true,
+      enable: SlackNotificationEnable.ENABLED,
       secretName: 'example/slack/webhook',
     },
   },
@@ -132,11 +137,11 @@ describe('RDSDatabaseRunningScheduleStack', () => {
           targetResource: baseProps.targetResource,
           notification: {
             slack: {
-              enable: true,
+              enable: SlackNotificationEnable.ENABLED,
             },
           },
         });
-      }).toThrow('notification.slack.secretName is required when notification.slack.enable is true');
+      }).toThrow('notification.slack.secretName is required when notification.slack.enable is enabled');
     });
   });
 
@@ -183,7 +188,7 @@ describe('RDSDatabaseRunningScheduleStack', () => {
       targetResource: baseProps.targetResource,
       notification: {
         slack: {
-          enable: false,
+          enable: SlackNotificationEnable.DISABLED,
           secretName: 'example/slack/webhook',
         },
       },
@@ -238,7 +243,7 @@ describe('RDSDatabaseRunningScheduleStack', () => {
     const app = new App();
     const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
       ...baseProps,
-      enableScheduling: false,
+      enableScheduling: SchedulingEnable.DISABLED,
     });
     const template = Template.fromStack(stack);
 
@@ -273,7 +278,7 @@ describe('RDSDatabaseRunningScheduleStack', () => {
     const app = new App();
     const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
       ...baseProps,
-      enableScheduling: true,
+      enableScheduling: SchedulingEnable.ENABLED,
       startSchedule: {
         timezone: TimeZone.ASIA_TOKYO,
         minute: '55',
@@ -327,9 +332,9 @@ describe('RDSDatabaseRunningScheduleStack', () => {
         },
         notification: {
           slack: {
-            enable: true,
+            enable: SlackNotificationEnable.ENABLED,
             secretName: 'example/slack/webhook',
-            notifyOnWaitTimeout: false,
+            notifyOnWaitTimeout: WaitTimeoutNotification.DISABLED,
           },
         },
       });
