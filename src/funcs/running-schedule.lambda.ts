@@ -24,6 +24,14 @@ import {
   filterClusterMemberDbs,
   parseRdsArn,
 } from './running-schedule-targets';
+import {
+  DEFAULT_MAX_WAIT_SECONDS,
+  DEFAULT_WAIT_INTERVAL_SECONDS,
+  nextWaitStep,
+  resolveResourceWait,
+  shouldContinueWaitLoop,
+  type WaitLoopSignal,
+} from './running-schedule-wait';
 
 /**
  * Canonical status labels and emojis used in Slack notifications.
@@ -31,17 +39,6 @@ import {
 const STATE_LIST = [
   { name: 'AVAILABLE', emoji: '🤩', state: 'available' },
   { name: 'STOPPED', emoji: '😴', state: 'stopped' },
-] as const;
-
-/**
- * RDS statuses that indicate an in-progress transition.
- */
-const TRANSITIONING_STATES = [
-  'starting',
-  'configuring-enhanced-monitoring',
-  'backing-up',
-  'modifying',
-  'stopping',
 ] as const;
 
 /**
@@ -163,30 +160,49 @@ const getStateDisplay = (current: string): { emoji: string; name: string } | und
 
 
 /**
- * Processes one RDS resource until it reaches a stable state.
+ * Processes one RDS resource until it reaches a stable state or the wait budget is spent.
  *
- * The function polls status, triggers start/stop when needed, and waits while
- * the resource is transitioning. Uses a region-specific RDS client derived
- * from the target ARN so resources outside the Lambda deployment region are
- * handled correctly.
+ * The function checks status, triggers start/stop when needed, and waits while
+ * the resource is transitioning. Each wait uses `intervalSeconds`. Accumulated
+ * waits stop at `maxSeconds`. Uses a region-specific RDS client derived from
+ * the target ARN so resources outside the Lambda deployment region are handled
+ * correctly.
  *
  * @param context Durable execution context.
  * @param targetResource Target RDS resource ARN after cluster-priority deduplication.
  * @param mode Requested operation mode.
- * @returns Final processing result including status and resource metadata.
+ * @param waitSettings Validated interval and maximum wait for this resource.
+ * @returns Final processing result including status and resource metadata. Status is `timed-out` when the wait budget is exhausted.
  * @throws {Error} When the resource reaches an unexpected status or a DB instance is not found.
  */
 const processing = async (
   context: DurableContext,
   targetResource: string,
   mode: 'Start' | 'Stop',
+  waitSettings: { intervalSeconds: number; maxSeconds: number },
 ): Promise<ProcessingResult> => {
   const target = await context.step('get-identifier', async () => parseRdsArn(targetResource));
 
   const rds = getRdsClient(target.region);
+  const { intervalSeconds, maxSeconds } = waitSettings;
   let iteration = 0;
+  let elapsedWaitSeconds = 0;
+  let signal: WaitLoopSignal = 'open';
+  let outcome: ProcessingResult | undefined;
+  let failureMessage: string | undefined;
 
-  for (;;) {
+  const toResult = (status: string): ProcessingResult => ({
+    resource: targetResource,
+    status,
+    account: target.account,
+    region: target.region,
+    identifier: target.identifier,
+    type: target.type,
+  });
+
+  // Check status at least once. Continue only while the resource still needs a
+  // start, stop, or transition wait and the budget covers another interval.
+  do {
     const stepName = `describe-${target.type}-${target.identifier}-${iteration}`;
     const statusResult = await context.step(stepName, async () => {
       if (target.type === 'db') {
@@ -212,67 +228,62 @@ const processing = async (
         throw err;
       }
     });
-    iteration += 1;
 
-    if (statusResult.current === 'not-found') {
-      return { resource: targetResource, status: 'skipped', account: target.account, region: target.region, identifier: target.identifier, type: target.type };
+    const step = nextWaitStep(
+      mode,
+      statusResult.current,
+      elapsedWaitSeconds,
+      intervalSeconds,
+      maxSeconds,
+    );
+
+    if (step.kind === 'finish') {
+      signal = 'settled';
+      outcome = toResult(step.status);
     }
-
-    const current = statusResult.current;
-    const isDb = target.type === 'db';
-    const isCluster = target.type === 'cluster';
-
-    const needStart = mode === 'Start' && current === 'stopped';
-    const needStop = mode === 'Stop' && current === 'available';
-    const alreadyDone =
-      (mode === 'Start' && (current === 'available')) || (mode === 'Stop' && current === 'stopped');
-    const isTransitioning = TRANSITIONING_STATES.includes(current as (typeof TRANSITIONING_STATES)[number]);
-
-    if (needStart && isDb) {
+    if (step.kind === 'timed-out') {
+      signal = 'settled';
+      outcome = toResult('timed-out');
+    }
+    if (step.kind === 'fail') {
+      signal = 'failed';
+      failureMessage = `db instance or cluster status fail: type=${target.type} identifier=${target.identifier} current=${step.current}`;
+    }
+    if (step.kind === 'pause' && step.command === 'start' && target.type === 'db') {
       await context.step(`start-db-${target.identifier}`, async () => {
         await rds.send(new StartDBInstanceCommand({ DBInstanceIdentifier: target.identifier }));
       });
-      await context.wait({ seconds: 60 });
-      continue;
     }
-    if (needStart && isCluster) {
+    if (step.kind === 'pause' && step.command === 'start' && target.type === 'cluster') {
       await context.step(`start-cluster-${target.identifier}`, async () => {
         await rds.send(new StartDBClusterCommand({ DBClusterIdentifier: target.identifier }));
       });
-      await context.wait({ seconds: 60 });
-      continue;
     }
-    if (needStop && isDb) {
+    if (step.kind === 'pause' && step.command === 'stop' && target.type === 'db') {
       await context.step(`stop-db-${target.identifier}`, async () => {
         await rds.send(new StopDBInstanceCommand({ DBInstanceIdentifier: target.identifier }));
       });
-      await context.wait({ seconds: 60 });
-      continue;
     }
-    if (needStop && isCluster) {
+    if (step.kind === 'pause' && step.command === 'stop' && target.type === 'cluster') {
       await context.step(`stop-cluster-${target.identifier}`, async () => {
         await rds.send(new StopDBClusterCommand({ DBClusterIdentifier: target.identifier }));
       });
-      await context.wait({ seconds: 60 });
-      continue;
     }
-    if (alreadyDone) {
-      return {
-        resource: targetResource,
-        status: current,
-        account: target.account,
-        region: target.region,
-        identifier: target.identifier,
-        type: target.type,
-      };
-    }
-    if (isTransitioning) {
-      await context.wait({ seconds: 60 });
-      continue;
+    if (step.kind === 'pause') {
+      await context.wait({ seconds: intervalSeconds });
+      elapsedWaitSeconds += intervalSeconds;
     }
 
-    throw new Error(`db instance or cluster status fail: type=${target.type} identifier=${target.identifier} current=${current}`);
+    iteration += 1;
+  } while (shouldContinueWaitLoop(signal));
+
+  if (failureMessage !== undefined) {
+    throw new Error(failureMessage);
   }
+  if (outcome === undefined) {
+    throw new Error(`wait loop ended without a result: type=${target.type} identifier=${target.identifier}`);
+  }
+  return outcome;
 };
 
 /**
@@ -294,10 +305,17 @@ const processing = async (
  * `AWS_SESSION_TOKEN` and the Params and Secrets extension layer (attached by the
  * construct when Slack is enabled).
  *
+ * `WAIT_INTERVAL_SECONDS` and `MAX_WAIT_SECONDS` control the per-resource status
+ * check. When a resource exceeds the maximum, the handler posts a Slack timeout
+ * message only when Slack is configured and `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is true,
+ * then fails that resource.
+ *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results after deduplication.
  * @throws {Error} When required event parameters (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
+ * @throws {Error} When wait settings are not positive integers within the allowed maximum.
+ * @throws {Error} When a resource exceeds its wait budget.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
 export const handler = withDurableExecution(
@@ -307,6 +325,15 @@ export const handler = withDurableExecution(
       throw new Error('Invalid event: Params.TagKey, Params.TagValues, Params.Mode are required.');
     }
 
+    const resourceWait = resolveResourceWait(
+      StrictEnvResolver.resolve('WAIT_INTERVAL_SECONDS', StrictEnvType.Number, { default: DEFAULT_WAIT_INTERVAL_SECONDS }),
+      StrictEnvResolver.resolve('MAX_WAIT_SECONDS', StrictEnvType.Number, { default: DEFAULT_MAX_WAIT_SECONDS }),
+    );
+    const notifySlackOnWaitTimeout = StrictEnvResolver.resolve(
+      'NOTIFY_SLACK_ON_WAIT_TIMEOUT',
+      StrictEnvType.Boolean,
+      { default: false },
+    );
     const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
 
     let slackClient: WebClient | undefined;
@@ -355,9 +382,38 @@ export const handler = withDurableExecution(
       targetResources,
       async (ctx: DurableContext, targetResource: string, index: number) => {
         return ctx.runInChildContext(`resource-${index}`, async (childCtx: DurableContext) => {
-          const result = await processing(childCtx, targetResource, params.Mode);
+          const result = await processing(childCtx, targetResource, params.Mode, resourceWait);
           if (result.status === 'skipped') {
             return result;
+          }
+          if (result.status === 'timed-out') {
+            if (slackClient && slackChannel && notifySlackOnWaitTimeout) {
+              const client = slackClient;
+              const channel = slackChannel;
+              await childCtx.step('post-slack-timeout-message', async () => {
+                return client.chat.postMessage({
+                  channel,
+                  thread_ts: slackParentMessageTs,
+                  attachments: [
+                    {
+                      color: '#e01e5a',
+                      pretext: `The RDS ${result.type} ${result.identifier} did not reach the target state within the wait limit.`,
+                      fields: [
+                        { title: 'Account', value: result.account, short: true },
+                        { title: 'Region', value: result.region, short: true },
+                        { title: 'Type', value: result.type, short: true },
+                        { title: 'Identifier', value: result.identifier, short: true },
+                        { title: 'Status', value: 'TIMED_OUT', short: true },
+                        { title: 'Max wait (seconds)', value: String(resourceWait.maxSeconds), short: true },
+                      ],
+                    },
+                  ],
+                });
+              });
+            }
+            throw new Error(
+              `wait timed out: type=${result.type} identifier=${result.identifier} maxWaitSeconds=${resourceWait.maxSeconds}`,
+            );
           }
           if (!slackClient || !slackChannel) {
             return result;

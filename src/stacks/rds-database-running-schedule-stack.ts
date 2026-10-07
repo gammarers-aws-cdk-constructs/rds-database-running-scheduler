@@ -1,6 +1,12 @@
 import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { RDSDatabaseRunningScheduler, TargetResource, Schedule, Notification } from '../constructs/rds-database-running-scheduler';
+import {
+  RDSDatabaseRunningScheduler,
+  type Notification,
+  type ResourceWait,
+  type Schedule,
+  type TargetResource,
+} from '../constructs/rds-database-running-scheduler';
 
 /**
  * Properties for the RDS database running schedule stack.
@@ -13,6 +19,11 @@ export interface RDSDatabaseRunningScheduleStackProps extends StackProps {
    * Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
    */
   readonly notification?: Notification;
+  /**
+   * Optional per-resource wait settings.
+   * Defaults to a 60-second interval and a 1800-second maximum.
+   */
+  readonly resourceWait?: ResourceWait;
   /** Enables or disables both start and stop schedules. Default: `true`. */
   readonly enableScheduling?: boolean;
   /** Optional cron configuration for stop operations. */
@@ -26,7 +37,8 @@ export interface RDSDatabaseRunningScheduleStackProps extends StackProps {
  * in the deployment account.
  *
  * Delegates resource discovery, cluster-priority deduplication, start/stop
- * execution, and optional Slack notifications to {@link RDSDatabaseRunningScheduler}.
+ * execution, per-resource wait limits, and optional Slack notifications to
+ * {@link RDSDatabaseRunningScheduler}.
  */
 export class RDSDatabaseRunningScheduleStack extends Stack {
   /**
@@ -43,6 +55,7 @@ export class RDSDatabaseRunningScheduleStack extends Stack {
       targetResource: props.targetResource,
       enableScheduling: props.enableScheduling,
       notification: props.notification,
+      resourceWait: props.resourceWait,
       stopSchedule: props.stopSchedule,
       startSchedule: props.startSchedule,
     });

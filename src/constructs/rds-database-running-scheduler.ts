@@ -7,6 +7,11 @@ import * as targets from 'aws-cdk-lib/aws-scheduler-targets';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { RunningScheduleFunction } from '../funcs/running-schedule-function';
+import {
+  DEFAULT_MAX_WAIT_SECONDS,
+  DEFAULT_WAIT_INTERVAL_SECONDS,
+  resolveResourceWait,
+} from '../funcs/running-schedule-wait';
 
 /**
  * Cron schedule settings for EventBridge Scheduler.
@@ -48,6 +53,12 @@ export interface SlackNotification {
    * Required when `enable` is `true`.
    */
   readonly secretName?: string;
+  /**
+   * Whether to post a Slack message when a resource exceeds `resourceWait.maxSeconds`.
+   * Applies only when `enable` is `true`.
+   * @default true
+   */
+  readonly notifyOnWaitTimeout?: boolean;
 }
 
 /**
@@ -58,6 +69,25 @@ export interface SlackNotification {
 export interface Notification {
   /** Optional Slack notification settings. Set `slack.enable` to `true` to send messages. */
   readonly slack?: SlackNotification;
+}
+
+/**
+ * Per-resource wait settings for start/stop status checks.
+ */
+export interface ResourceWait {
+  /**
+   * Seconds between status checks while a resource is starting, stopping, or otherwise transitioning.
+   * Must be a positive integer.
+   * @default 60
+   */
+  readonly intervalSeconds?: number;
+  /**
+   * Maximum accumulated wait seconds for one resource to reach a stable state.
+   * Must be a positive integer, greater than or equal to `intervalSeconds`, and at most 6900
+   * so the limit fires before the 2-hour durable execution timeout.
+   * @default 1800
+   */
+  readonly maxSeconds?: number;
 }
 
 /**
@@ -73,6 +103,11 @@ export interface RDSDatabaseRunningSchedulerProps {
    * Set `notification.slack.enable` to `true` and provide `secretName` to send Slack messages.
    */
   readonly notification?: Notification;
+  /**
+   * Optional per-resource wait settings.
+   * Defaults to a 60-second interval and a 1800-second maximum.
+   */
+  readonly resourceWait?: ResourceWait;
   /** Optional override for stop schedule cron configuration. */
   readonly stopSchedule?: Schedule;
   /** Optional override for start schedule cron configuration. */
@@ -88,7 +123,7 @@ export interface RDSDatabaseRunningSchedulerProps {
  */
 const resolveSlackNotification = (
   slack: SlackNotification | undefined,
-): { enabled: true; secretName: string } | { enabled: false } => {
+): { enabled: true; secretName: string; notifyOnWaitTimeout: boolean } | { enabled: false } => {
   if (!slack) {
     return { enabled: false };
   }
@@ -98,7 +133,11 @@ const resolveSlackNotification = (
   if (!slack.secretName) {
     throw new Error('notification.slack.secretName is required when notification.slack.enable is true');
   }
-  return { enabled: true, secretName: slack.secretName };
+  return {
+    enabled: true,
+    secretName: slack.secretName,
+    notifyOnWaitTimeout: slack.notifyOnWaitTimeout !== false,
+  };
 };
 
 /**
@@ -133,9 +172,11 @@ const rdsResourceTagCondition = (
  * The Lambda discovers matching resources account-wide via the Resource Groups
  * Tagging API, deduplicates Aurora cluster member instances when the parent
  * cluster is also tagged, and controls each remaining resource using the
- * region encoded in its ARN. When Slack is enabled, the Lambda posts progress
- * and results to Slack; otherwise Secrets Manager lookup, Slack API calls,
- * and related IAM grants are skipped.
+ * region encoded in its ARN. Each resource is checked on a configurable interval
+ * until it reaches a stable state or the per-resource wait limit. When Slack is
+ * enabled, the Lambda posts progress and results to Slack, and can post a timeout
+ * message when the wait limit is exceeded. Otherwise Secrets Manager lookup, Slack
+ * API calls, and related IAM grants are skipped.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**
@@ -149,6 +190,14 @@ export class RDSDatabaseRunningScheduler extends Construct {
     super(scope, id);
 
     const slackNotification = resolveSlackNotification(props.notification?.slack);
+    const resourceWait = resolveResourceWait(
+      props.resourceWait?.intervalSeconds ?? DEFAULT_WAIT_INTERVAL_SECONDS,
+      props.resourceWait?.maxSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
+    );
+    let notifySlackOnWaitTimeout = false;
+    if (slackNotification.enabled) {
+      notifySlackOnWaitTimeout = slackNotification.notifyOnWaitTimeout;
+    }
 
     // 👇 Lambda Function
     const runningScheduleFunction = new RunningScheduleFunction(this, 'RunningScheduleFunction', {
@@ -162,6 +211,9 @@ export class RDSDatabaseRunningScheduler extends Construct {
         retentionPeriod: Duration.days(1),
       },
       environment: {
+        WAIT_INTERVAL_SECONDS: String(resourceWait.intervalSeconds),
+        MAX_WAIT_SECONDS: String(resourceWait.maxSeconds),
+        NOTIFY_SLACK_ON_WAIT_TIMEOUT: notifySlackOnWaitTimeout ? 'true' : 'false',
         ...(slackNotification.enabled
           ? { SLACK_SECRET_NAME: slackNotification.secretName }
           : {}),
