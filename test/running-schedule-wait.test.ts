@@ -1,12 +1,13 @@
+import { RdsDatabaseRunningSchedulerValidateError } from '../src/funcs/core/running-schedule-errors';
 import {
   decideResourceAction,
   hasWaitBudget,
-  MAX_WAIT_SECONDS_LIMIT,
   nextWaitStep,
   resolveResourceWait,
   shouldContinueWaitLoop,
   TRANSITIONING_STATES,
-} from '../src/core/resource-wait';
+} from '../src/funcs/core/running-schedule-wait';
+import { MAX_WAIT_SECONDS_LIMIT } from '../src/settings/consts';
 
 describe('decideResourceAction', () => {
   it.each([
@@ -177,6 +178,7 @@ describe('resolveResourceWait', () => {
       message: `resourceWait.maxSeconds must be less than or equal to ${MAX_WAIT_SECONDS_LIMIT}`,
     },
   ])('rejects interval $interval and max $max', ({ interval, max, message }) => {
+    expect(() => resolveResourceWait(interval, max)).toThrow(RdsDatabaseRunningSchedulerValidateError);
     expect(() => resolveResourceWait(interval, max)).toThrow(message);
   });
 });

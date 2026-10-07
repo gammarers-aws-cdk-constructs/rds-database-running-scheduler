@@ -359,6 +359,11 @@ describe('RDSDatabaseRunningScheduleStack', () => {
         message: 'resourceWait.intervalSeconds must be a positive integer',
       },
       {
+        name: 'max is not a positive integer',
+        resourceWait: { intervalSeconds: 60, maxSeconds: 0 },
+        message: 'resourceWait.maxSeconds must be a positive integer',
+      },
+      {
         name: 'max is below the interval',
         resourceWait: { intervalSeconds: 120, maxSeconds: 60 },
         message: 'resourceWait.maxSeconds must be greater than or equal to resourceWait.intervalSeconds',

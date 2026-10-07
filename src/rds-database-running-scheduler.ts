@@ -6,12 +6,12 @@ import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as targets from 'aws-cdk-lib/aws-scheduler-targets';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+import { RunningScheduleFunction } from './funcs/running-schedule-function';
 import {
   DEFAULT_MAX_WAIT_SECONDS,
   DEFAULT_WAIT_INTERVAL_SECONDS,
-  resolveResourceWait,
-} from './core/resource-wait';
-import { RunningScheduleFunction } from './funcs/running-schedule-function';
+  MAX_WAIT_SECONDS_LIMIT,
+} from './settings/consts';
 
 /**
  * Whether Slack notifications are sent.
@@ -185,6 +185,46 @@ const resolveSlackNotification = (
     secretName: slack.secretName,
     notifyOnWaitTimeout: slack.notifyOnWaitTimeout ?? WaitTimeoutNotification.ENABLED,
   };
+};
+
+/**
+ * Validated per-resource wait settings.
+ */
+interface ResolvedResourceWait {
+  /** Seconds between status checks. */
+  readonly intervalSeconds: number;
+  /** Maximum accumulated wait seconds for one resource. */
+  readonly maxSeconds: number;
+}
+
+/**
+ * Validates per-resource wait settings during synthesis.
+ *
+ * Throws a plain `Error` because this runs on the jsii surface. The handler
+ * checks the same limits and throws its own error type.
+ *
+ * @param intervalSeconds Seconds between status checks.
+ * @param maxSeconds Maximum accumulated wait seconds for one resource.
+ * @returns The same values when they are valid.
+ * @throws {Error} When either value is not a positive integer, when `maxSeconds` is less than `intervalSeconds`, or when `maxSeconds` exceeds {@link MAX_WAIT_SECONDS_LIMIT}.
+ */
+const resolveResourceWait = (
+  intervalSeconds: number,
+  maxSeconds: number,
+): ResolvedResourceWait => {
+  if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
+    throw new Error('resourceWait.intervalSeconds must be a positive integer');
+  }
+  if (!Number.isInteger(maxSeconds) || maxSeconds <= 0) {
+    throw new Error('resourceWait.maxSeconds must be a positive integer');
+  }
+  if (maxSeconds < intervalSeconds) {
+    throw new Error('resourceWait.maxSeconds must be greater than or equal to resourceWait.intervalSeconds');
+  }
+  if (maxSeconds > MAX_WAIT_SECONDS_LIMIT) {
+    throw new Error(`resourceWait.maxSeconds must be less than or equal to ${MAX_WAIT_SECONDS_LIMIT}`);
+  }
+  return { intervalSeconds, maxSeconds };
 };
 
 /**

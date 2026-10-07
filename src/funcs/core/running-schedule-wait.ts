@@ -4,18 +4,8 @@
  * These helpers do not read the clock, environment, or AWS SDK. The Lambda
  * applies the returned step: finish, fail, time out, or pause for one interval.
  */
-
-/** Default seconds between status checks. */
-export const DEFAULT_WAIT_INTERVAL_SECONDS = 60;
-
-/** Default maximum wait seconds for one resource. */
-export const DEFAULT_MAX_WAIT_SECONDS = 1800;
-
-/**
- * Upper bound for the per-resource wait.
- * Stays under the 2-hour durable execution timeout so this limit fires first.
- */
-export const MAX_WAIT_SECONDS_LIMIT = 6900;
+import { RdsDatabaseRunningSchedulerValidateError } from './running-schedule-errors';
+import { MAX_WAIT_SECONDS_LIMIT } from '../../settings/consts';
 
 /**
  * RDS statuses that indicate an in-progress transition.
@@ -171,28 +161,36 @@ export const nextWaitStep = (
 export const shouldContinueWaitLoop = (signal: WaitLoopSignal): boolean => signal === 'open';
 
 /**
- * Validates per-resource wait settings.
+ * Validates per-resource wait settings for the handler.
  *
  * @param intervalSeconds Seconds between status checks.
  * @param maxSeconds Maximum accumulated wait seconds for one resource.
  * @returns The same values when they are valid.
- * @throws {Error} When either value is not a positive integer, when `maxSeconds` is less than `intervalSeconds`, or when `maxSeconds` exceeds {@link MAX_WAIT_SECONDS_LIMIT}.
+ * @throws {RdsDatabaseRunningSchedulerValidateError} When either value is not a positive integer, when `maxSeconds` is less than `intervalSeconds`, or when `maxSeconds` exceeds the shared limit.
  */
 export const resolveResourceWait = (
   intervalSeconds: number,
   maxSeconds: number,
 ): ResolvedResourceWait => {
   if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
-    throw new Error('resourceWait.intervalSeconds must be a positive integer');
+    throw new RdsDatabaseRunningSchedulerValidateError(
+      'resourceWait.intervalSeconds must be a positive integer',
+    );
   }
   if (!Number.isInteger(maxSeconds) || maxSeconds <= 0) {
-    throw new Error('resourceWait.maxSeconds must be a positive integer');
+    throw new RdsDatabaseRunningSchedulerValidateError(
+      'resourceWait.maxSeconds must be a positive integer',
+    );
   }
   if (maxSeconds < intervalSeconds) {
-    throw new Error('resourceWait.maxSeconds must be greater than or equal to resourceWait.intervalSeconds');
+    throw new RdsDatabaseRunningSchedulerValidateError(
+      'resourceWait.maxSeconds must be greater than or equal to resourceWait.intervalSeconds',
+    );
   }
   if (maxSeconds > MAX_WAIT_SECONDS_LIMIT) {
-    throw new Error(`resourceWait.maxSeconds must be less than or equal to ${MAX_WAIT_SECONDS_LIMIT}`);
+    throw new RdsDatabaseRunningSchedulerValidateError(
+      `resourceWait.maxSeconds must be less than or equal to ${MAX_WAIT_SECONDS_LIMIT}`,
+    );
   }
   return { intervalSeconds, maxSeconds };
 };

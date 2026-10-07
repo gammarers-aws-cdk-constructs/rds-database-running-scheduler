@@ -3,7 +3,7 @@ import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
   shouldExcludeClusterMemberDb,
-} from '../src/funcs/running-schedule-targets';
+} from '../src/funcs/core/running-schedule-targets';
 
 describe('buildClusterKey', () => {
   it('combines region and cluster identifier', () => {

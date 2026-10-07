@@ -20,18 +20,21 @@ import { WebClient } from '@slack/web-api';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { StrictEnvResolver, StrictEnvType } from 'strict-env-resolver';
 import {
+  DEFAULT_MAX_WAIT_SECONDS,
+  DEFAULT_WAIT_INTERVAL_SECONDS,
+} from '../settings/consts';
+import { RdsDatabaseRunningSchedulerTimeoutError } from './core/running-schedule-errors';
+import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
   parseRdsArn,
-} from './running-schedule-targets';
+} from './core/running-schedule-targets';
 import {
-  DEFAULT_MAX_WAIT_SECONDS,
-  DEFAULT_WAIT_INTERVAL_SECONDS,
   nextWaitStep,
   resolveResourceWait,
   shouldContinueWaitLoop,
   type WaitLoopSignal,
-} from '../core/resource-wait';
+} from './core/running-schedule-wait';
 
 /**
  * Canonical status labels and emojis used in Slack notifications.
@@ -333,8 +336,8 @@ const processing = async (
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results after deduplication.
  * @throws {Error} When required event parameters (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
- * @throws {Error} When wait settings are not positive integers within the allowed maximum.
- * @throws {Error} When a resource exceeds its wait budget.
+ * @throws {RdsDatabaseRunningSchedulerValidateError} When wait settings are not positive integers within the allowed maximum.
+ * @throws {RdsDatabaseRunningSchedulerTimeoutError} When a resource exceeds its wait budget.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
 export const handler = withDurableExecution(
@@ -430,7 +433,7 @@ export const handler = withDurableExecution(
                 });
               });
             }
-            throw new Error(
+            throw new RdsDatabaseRunningSchedulerTimeoutError(
               `wait timed out: type=${result.type} identifier=${result.identifier} maxWaitSeconds=${resourceWait.maxSeconds}`,
             );
           }

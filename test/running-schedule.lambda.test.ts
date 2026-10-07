@@ -17,6 +17,10 @@ import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { mockClient } from 'aws-sdk-client-mock';
 import 'aws-sdk-client-mock-jest';
 import { StrictEnvResolver } from 'strict-env-resolver';
+import {
+  RdsDatabaseRunningSchedulerTimeoutError,
+  RdsDatabaseRunningSchedulerValidateError,
+} from '../src/funcs/core/running-schedule-errors';
 import { handler as runningScheduleHandler } from '../src/funcs/running-schedule.lambda';
 
 jest.mock('@aws/durable-execution-sdk-js', () => ({
@@ -518,7 +522,10 @@ describe('running-schedule.lambda', () => {
       rdsMock.on(StartDBInstanceCommand).resolves({});
 
       const context = createMockDurableContext();
-      await expect(handler(createEvent('Start'), context)).rejects.toThrow(
+      const timeout = await handler(createEvent('Start'), context).catch((caught: unknown) => caught);
+      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
+      expect(timeout).toHaveProperty(
+        'message',
         'wait timed out: type=db identifier=test-db maxWaitSeconds=120',
       );
       expect(context.wait).toHaveBeenCalledTimes(2);
@@ -534,7 +541,10 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'starting' }] })
         .resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
 
-      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+      const timeout = await handler(createEvent('Start'), createMockDurableContext()).catch((caught: unknown) => caught);
+      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
+      expect(timeout).toHaveProperty(
+        'message',
         'wait timed out: type=db identifier=test-db maxWaitSeconds=60',
       );
       expect(mockPostMessage).toHaveBeenCalledTimes(2);
@@ -560,7 +570,10 @@ describe('running-schedule.lambda', () => {
       mockDiscoveredResources([clusterArn]);
       rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'stopping' }] });
 
-      await expect(handler(createEvent('Stop'), createMockDurableContext())).rejects.toThrow(
+      const timeout = await handler(createEvent('Stop'), createMockDurableContext()).catch((caught: unknown) => caught);
+      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
+      expect(timeout).toHaveProperty(
+        'message',
         'wait timed out: type=cluster identifier=test-cluster maxWaitSeconds=60',
       );
       expect(mockPostMessage).toHaveBeenCalledTimes(1);
@@ -569,9 +582,9 @@ describe('running-schedule.lambda', () => {
     it('throws on invalid wait settings before calling RDS', async () => {
       mockEnv({ WAIT_INTERVAL_SECONDS: 1.5 });
 
-      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
-        'resourceWait.intervalSeconds must be a positive integer',
-      );
+      const invalid = await handler(createEvent('Start'), createMockDurableContext()).catch((caught: unknown) => caught);
+      expect(invalid).toBeInstanceOf(RdsDatabaseRunningSchedulerValidateError);
+      expect(invalid).toHaveProperty('message', 'resourceWait.intervalSeconds must be a positive integer');
       expect(rdsMock).not.toHaveReceivedCommand(DescribeDBInstancesCommand);
     });
   });
@@ -592,7 +605,10 @@ describe('running-schedule.lambda', () => {
         DBInstances: [{ DBInstanceStatus: 'starting' }],
       });
 
-      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+      const timeout = await handler(createEvent('Start'), createMockDurableContext()).catch((caught: unknown) => caught);
+      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
+      expect(timeout).toHaveProperty(
+        'message',
         'wait timed out: type=db identifier=test-db maxWaitSeconds=60',
       );
       expect(secretFetcher.getSecretValue).not.toHaveBeenCalled();
