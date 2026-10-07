@@ -74,7 +74,8 @@ export interface TargetResource {
 export interface SlackNotification {
   /**
    * Whether Slack notifications are enabled.
-   * When {@link SlackNotificationEnable.DISABLED}, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
+   * When {@link SlackNotificationEnable.DISABLED}, Secrets Manager lookup,
+   * Slack API calls, and related IAM grants are skipped.
    * @default SlackNotificationEnable.DISABLED
    */
   readonly enable?: SlackNotificationEnable;
@@ -97,7 +98,10 @@ export interface SlackNotification {
  * Additional channels can be added here in the future without changing top-level props.
  */
 export interface Notification {
-  /** Optional Slack notification settings. Set `slack.enable` to {@link SlackNotificationEnable.ENABLED} to send messages. */
+  /**
+   * Optional Slack notification settings.
+   * Set `slack.enable` to {@link SlackNotificationEnable.ENABLED} to send messages.
+   */
   readonly slack?: SlackNotification;
 }
 
@@ -133,7 +137,8 @@ export interface RDSDatabaseRunningSchedulerProps {
   readonly enableScheduling?: SchedulingEnable;
   /**
    * Optional notification channels.
-   * Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED} and provide `secretName` to send Slack messages.
+   * Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED}
+   * and provide `secretName` to send Slack messages.
    */
   readonly notification?: Notification;
   /**
@@ -206,7 +211,8 @@ interface ResolvedResourceWait {
  * @param intervalSeconds Seconds between status checks.
  * @param maxSeconds Maximum accumulated wait seconds for one resource.
  * @returns The same values when they are valid.
- * @throws {Error} When either value is not a positive integer, when `maxSeconds` is less than `intervalSeconds`, or when `maxSeconds` exceeds {@link MAX_WAIT_SECONDS_LIMIT}.
+ * @throws {Error} When either value is not a positive integer, when `maxSeconds`
+ * is less than `intervalSeconds`, or when `maxSeconds` exceeds {@link MAX_WAIT_SECONDS_LIMIT}.
  */
 const resolveResourceWait = (
   intervalSeconds: number,
@@ -370,7 +376,8 @@ export class RDSDatabaseRunningScheduler extends Construct {
     // Undefined keeps the schedules enabled. Only an explicit disabled value turns them off.
     const scheduleEnabled = props.enableScheduling !== SchedulingEnable.DISABLED;
 
-    // Each schedule invokes the durable Lambda, which discovers tagged resources, starts or stops them, and waits for a stable state.
+    // Each schedule invokes the durable Lambda, which discovers tagged resources,
+    // starts or stops them, and waits for a stable state.
     new scheduler.Schedule(this, 'RunningStartSchedule', {
       description: 'running start schedule',
       enabled: scheduleEnabled,

@@ -194,7 +194,8 @@ const readErrorName = (err: unknown): string => {
  * @param targetResource Target RDS resource ARN after cluster-priority deduplication.
  * @param mode Requested operation mode.
  * @param waitSettings Validated interval and maximum wait for this resource.
- * @returns Final processing result including status and resource metadata. Status is `timed-out` when the wait budget is exhausted.
+ * @returns Final processing result including status and resource metadata.
+ * Status is `timed-out` when the wait budget is exhausted.
  * @throws {Error} When the resource reaches an unexpected status or a DB instance is not found.
  */
 const processing = async (
@@ -269,7 +270,8 @@ const processing = async (
     }
     if (step.kind === 'fail') {
       signal = 'failed';
-      failureMessage = `db instance or cluster status fail: type=${target.type} identifier=${target.identifier} current=${step.current}`;
+      failureMessage = `db instance or cluster status fail: type=${target.type}`
+        + ` identifier=${target.identifier} current=${step.current}`;
     }
     if (step.kind === 'pause' && step.command === 'start' && target.type === 'db') {
       await context.step(`start-db-${target.identifier}`, async () => {
@@ -335,8 +337,10 @@ const processing = async (
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results after deduplication.
- * @throws {Error} When required event parameters (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
- * @throws {RdsDatabaseRunningSchedulerValidateError} When wait settings are not positive integers within the allowed maximum.
+ * @throws {Error} When required event parameters
+ * (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
+ * @throws {RdsDatabaseRunningSchedulerValidateError} When wait settings are not
+ * positive integers within the allowed maximum.
  * @throws {RdsDatabaseRunningSchedulerTimeoutError} When a resource exceeds its wait budget.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
@@ -419,7 +423,8 @@ export const handler = withDurableExecution(
                   attachments: [
                     {
                       color: '#e01e5a',
-                      pretext: `The RDS ${result.type} ${result.identifier} did not reach the target state within the wait limit.`,
+                      pretext: `The RDS ${result.type} ${result.identifier}`
+                        + ' did not reach the target state within the wait limit.',
                       fields: [
                         { title: 'Account', value: result.account, short: true },
                         { title: 'Region', value: result.region, short: true },
@@ -434,7 +439,8 @@ export const handler = withDurableExecution(
               });
             }
             throw new RdsDatabaseRunningSchedulerTimeoutError(
-              `wait timed out: type=${result.type} identifier=${result.identifier} maxWaitSeconds=${resourceWait.maxSeconds}`,
+              `wait timed out: type=${result.type} identifier=${result.identifier}`
+              + ` maxWaitSeconds=${resourceWait.maxSeconds}`,
             );
           }
           if (!slackClient || !slackChannel) {
@@ -451,7 +457,8 @@ export const handler = withDurableExecution(
               attachments: [
                 {
                   color: '#36a64f',
-                  pretext: `${display?.emoji} The status of the RDS ${result.type} changed to ${display?.name} due to the schedule.`,
+                  pretext: `${display?.emoji} The status of the RDS ${result.type}`
+                    + ` changed to ${display?.name} due to the schedule.`,
                   fields: [
                     { title: 'Account', value: result.account, short: true },
                     { title: 'Region', value: result.region, short: true },

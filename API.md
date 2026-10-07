@@ -1214,7 +1214,8 @@ public readonly notification: Notification;
 
 Optional notification channels.
 
-Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED} and provide `secretName` to send Slack messages.
+Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED}
+and provide `secretName` to send Slack messages.
 
 ---
 
@@ -1331,7 +1332,8 @@ public readonly notification: Notification;
 
 Optional notification channels.
 
-Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED} and provide `secretName` to send Slack messages.
+Set `notification.slack.enable` to {@link SlackNotificationEnable.ENABLED}
+and provide `secretName` to send Slack messages.
 
 ---
 
@@ -1775,7 +1777,8 @@ public readonly enable: SlackNotificationEnable;
 
 Whether Slack notifications are enabled.
 
-When {@link SlackNotificationEnable.DISABLED}, Secrets Manager lookup, Slack API calls, and related IAM grants are skipped.
+When {@link SlackNotificationEnable.DISABLED}, Secrets Manager lookup,
+Slack API calls, and related IAM grants are skipped.
 
 ---
 

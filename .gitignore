@@ -53,4 +53,6 @@ junit.xml
 !/API.md
 /assets/
 !/src/funcs/running-schedule-function.ts
+!/.editorconfig
+!/.devcontainer/devcontainer.json
 !/.projenrc.ts

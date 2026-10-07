@@ -166,7 +166,8 @@ export const shouldContinueWaitLoop = (signal: WaitLoopSignal): boolean => signa
  * @param intervalSeconds Seconds between status checks.
  * @param maxSeconds Maximum accumulated wait seconds for one resource.
  * @returns The same values when they are valid.
- * @throws {RdsDatabaseRunningSchedulerValidateError} When either value is not a positive integer, when `maxSeconds` is less than `intervalSeconds`, or when `maxSeconds` exceeds the shared limit.
+ * @throws {RdsDatabaseRunningSchedulerValidateError} When either value is not a positive integer,
+ * when `maxSeconds` is less than `intervalSeconds`, or when `maxSeconds` exceeds the shared limit.
  */
 export const resolveResourceWait = (
   intervalSeconds: number,
