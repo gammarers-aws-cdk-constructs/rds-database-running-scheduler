@@ -90,7 +90,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
+          "S3Key": "26106a92547cef299de245ca9c541ae4fdda0e0a3a2304b2a5b645fa53183080.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -100,6 +100,8 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
         "Environment": {
           "Variables": {
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
+            "MAX_WAIT_SECONDS": "1800",
+            "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "true",
             "PARAMETERS_SECRETS_EXTENSION_CACHE_ENABLED": "true",
             "PARAMETERS_SECRETS_EXTENSION_CACHE_SIZE": "500",
             "PARAMETERS_SECRETS_EXTENSION_HTTP_PORT": "2773",
@@ -110,6 +112,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
             "SLACK_SECRET_NAME": "example/slack/webhook",
             "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
             "SSM_PARAMETER_STORE_TTL": "300",
+            "WAIT_INTERVAL_SECONDS": "60",
           },
         },
         "Handler": "index.handler",
@@ -151,7 +154,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9616a56b6a75f38b201d6595a2ce2c3b942",
             "Version",
           ],
         },
@@ -159,7 +162,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9616a56b6a75f38b201d6595a2ce2c3b942": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -585,7 +588,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
+          "S3Key": "26106a92547cef299de245ca9c541ae4fdda0e0a3a2304b2a5b645fa53183080.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -595,6 +598,8 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
         "Environment": {
           "Variables": {
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
+            "MAX_WAIT_SECONDS": "1800",
+            "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "true",
             "PARAMETERS_SECRETS_EXTENSION_CACHE_ENABLED": "true",
             "PARAMETERS_SECRETS_EXTENSION_CACHE_SIZE": "500",
             "PARAMETERS_SECRETS_EXTENSION_HTTP_PORT": "2773",
@@ -605,6 +610,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
             "SLACK_SECRET_NAME": "example/slack/webhook",
             "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
             "SSM_PARAMETER_STORE_TTL": "300",
+            "WAIT_INTERVAL_SECONDS": "60",
           },
         },
         "Handler": "index.handler",
@@ -646,7 +652,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9616a56b6a75f38b201d6595a2ce2c3b942",
             "Version",
           ],
         },
@@ -654,7 +660,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9616a56b6a75f38b201d6595a2ce2c3b942": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1080,7 +1086,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
+          "S3Key": "26106a92547cef299de245ca9c541ae4fdda0e0a3a2304b2a5b645fa53183080.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1090,6 +1096,8 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
         "Environment": {
           "Variables": {
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
+            "MAX_WAIT_SECONDS": "1800",
+            "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "true",
             "PARAMETERS_SECRETS_EXTENSION_CACHE_ENABLED": "true",
             "PARAMETERS_SECRETS_EXTENSION_CACHE_SIZE": "500",
             "PARAMETERS_SECRETS_EXTENSION_HTTP_PORT": "2773",
@@ -1100,6 +1108,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
             "SLACK_SECRET_NAME": "example/slack/webhook",
             "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
             "SSM_PARAMETER_STORE_TTL": "300",
+            "WAIT_INTERVAL_SECONDS": "60",
           },
         },
         "Handler": "index.handler",
@@ -1141,7 +1150,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9616a56b6a75f38b201d6595a2ce2c3b942",
             "Version",
           ],
         },
@@ -1149,7 +1158,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961c4eefc32fd430991c0b7018109a61289": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9616a56b6a75f38b201d6595a2ce2c3b942": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1508,7 +1517,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
+          "S3Key": "26106a92547cef299de245ca9c541ae4fdda0e0a3a2304b2a5b645fa53183080.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1518,6 +1527,9 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
         "Environment": {
           "Variables": {
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
+            "MAX_WAIT_SECONDS": "1800",
+            "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "false",
+            "WAIT_INTERVAL_SECONDS": "60",
           },
         },
         "Handler": "index.handler",
@@ -1548,7 +1560,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961570fd5169c4e85da85f0af5e16f455d2",
             "Version",
           ],
         },
@@ -1556,7 +1568,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961570fd5169c4e85da85f0af5e16f455d2": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1888,7 +1900,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "c1b85a4c41c2a5e4ec4c498438c3f83ace956e9b3c8b76d48474e60c22e040cb.zip",
+          "S3Key": "26106a92547cef299de245ca9c541ae4fdda0e0a3a2304b2a5b645fa53183080.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1898,6 +1910,9 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
         "Environment": {
           "Variables": {
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
+            "MAX_WAIT_SECONDS": "1800",
+            "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "false",
+            "WAIT_INTERVAL_SECONDS": "60",
           },
         },
         "Handler": "index.handler",
@@ -1928,7 +1943,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961570fd5169c4e85da85f0af5e16f455d2",
             "Version",
           ],
         },
@@ -1936,7 +1951,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9615f10ad1abe2e5be28cf6d1f30e9b8ae9": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961570fd5169c4e85da85f0af5e16f455d2": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },

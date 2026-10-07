@@ -111,6 +111,9 @@ describe('RDSDatabaseRunningScheduleStack', () => {
         Environment: {
           Variables: Match.objectLike({
             SLACK_SECRET_NAME: 'example/slack/webhook',
+            WAIT_INTERVAL_SECONDS: '60',
+            MAX_WAIT_SECONDS: '1800',
+            NOTIFY_SLACK_ON_WAIT_TIMEOUT: 'true',
           }),
         },
       });
@@ -155,6 +158,18 @@ describe('RDSDatabaseRunningScheduleStack', () => {
       const functions = template.findResources('AWS::Lambda::Function');
       const serialized = JSON.stringify(functions);
       expect(serialized).not.toContain('SLACK_SECRET_NAME');
+    });
+
+    it('Should set default wait limits and disable timeout Slack notification', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            WAIT_INTERVAL_SECONDS: '60',
+            MAX_WAIT_SECONDS: '1800',
+            NOTIFY_SLACK_ON_WAIT_TIMEOUT: 'false',
+          }),
+        },
+      });
     });
 
     it('Should match snapshot', () => {
@@ -298,6 +313,64 @@ describe('RDSDatabaseRunningScheduleStack', () => {
 
     it('Should match snapshot', () => {
       expect(template.toJSON()).toMatchSnapshot();
+    });
+  });
+
+  describe('resource wait', () => {
+    it('Should set custom wait environment variables', () => {
+      const app = new App();
+      const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+        ...baseProps,
+        resourceWait: {
+          intervalSeconds: 30,
+          maxSeconds: 600,
+        },
+        notification: {
+          slack: {
+            enable: true,
+            secretName: 'example/slack/webhook',
+            notifyOnWaitTimeout: false,
+          },
+        },
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            WAIT_INTERVAL_SECONDS: '30',
+            MAX_WAIT_SECONDS: '600',
+            NOTIFY_SLACK_ON_WAIT_TIMEOUT: 'false',
+            SLACK_SECRET_NAME: 'example/slack/webhook',
+          }),
+        },
+      });
+    });
+
+    it.each([
+      {
+        name: 'interval is not a positive integer',
+        resourceWait: { intervalSeconds: 0, maxSeconds: 1800 },
+        message: 'resourceWait.intervalSeconds must be a positive integer',
+      },
+      {
+        name: 'max is below the interval',
+        resourceWait: { intervalSeconds: 120, maxSeconds: 60 },
+        message: 'resourceWait.maxSeconds must be greater than or equal to resourceWait.intervalSeconds',
+      },
+      {
+        name: 'max exceeds the durable execution headroom',
+        resourceWait: { intervalSeconds: 60, maxSeconds: 6901 },
+        message: 'resourceWait.maxSeconds must be less than or equal to 6900',
+      },
+    ])('Should throw when $name', ({ resourceWait, message }) => {
+      const app = new App();
+      expect(() => {
+        new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+          targetResource: baseProps.targetResource,
+          resourceWait,
+        });
+      }).toThrow(message);
     });
   });
 });

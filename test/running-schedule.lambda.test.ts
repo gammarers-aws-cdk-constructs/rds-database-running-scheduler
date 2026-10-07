@@ -46,6 +46,24 @@ jest.mock('strict-env-resolver', () => ({
 
 const mockPostMessage = jest.fn().mockResolvedValue({ ts: '1234567890.123456' });
 
+const mockEnv = (
+  overrides: Partial<Record<string, string | number | boolean>> = {},
+): void => {
+  const values: Record<string, string | number | boolean> = {
+    SLACK_SECRET_NAME: 'example/slack/webhook',
+    WAIT_INTERVAL_SECONDS: 60,
+    MAX_WAIT_SECONDS: 1800,
+    NOTIFY_SLACK_ON_WAIT_TIMEOUT: true,
+    ...overrides,
+  };
+  (StrictEnvResolver.resolve as jest.Mock).mockImplementation((key: string) => {
+    if (!(key in values)) {
+      throw new Error(`Unexpected env key: ${key}`);
+    }
+    return values[key];
+  });
+};
+
 jest.mock('@slack/web-api', () => ({
   WebClient: jest.fn().mockImplementation(() => ({
     chat: {
@@ -205,12 +223,7 @@ describe('running-schedule.lambda', () => {
     rdsMock.reset();
     taggingMock.reset();
 
-    (StrictEnvResolver.resolve as jest.Mock).mockImplementation((key: string) => {
-      if (key === 'SLACK_SECRET_NAME') {
-        return 'example/slack/webhook';
-      }
-      throw new Error(`Unexpected env key: ${key}`);
-    });
+    mockEnv();
     (secretFetcher.getSecretValue as jest.Mock).mockResolvedValue({
       token: 'xoxb-test-token',
       channel: 'C12345678',
@@ -238,11 +251,9 @@ describe('running-schedule.lambda', () => {
 
   describe('Slack notification disabled', () => {
     beforeEach(() => {
-      (StrictEnvResolver.resolve as jest.Mock).mockImplementation((key: string) => {
-        if (key === 'SLACK_SECRET_NAME') {
-          return '';
-        }
-        throw new Error(`Unexpected env key: ${key}`);
+      mockEnv({
+        SLACK_SECRET_NAME: '',
+        NOTIFY_SLACK_ON_WAIT_TIMEOUT: false,
       });
     });
 
@@ -476,6 +487,116 @@ describe('running-schedule.lambda', () => {
       await expect(handler(createEvent('Stop'), createMockDurableContext())).rejects.toThrow(
         'network failure',
       );
+    });
+  });
+
+  describe('configurable wait', () => {
+    it('waits using WAIT_INTERVAL_SECONDS', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 15 });
+      mockDiscoveredResources([dbArn]);
+      rdsMock
+        .on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available' }] });
+      rdsMock.on(StartDBInstanceCommand).resolves({});
+
+      const context = createMockDurableContext();
+      const result = await handler(createEvent('Start'), context);
+
+      expect(result.results[0]?.status).toBe('available');
+      expect(context.wait).toHaveBeenCalledWith({ seconds: 15 });
+    });
+
+    it('throws when the wait budget is exhausted', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 120 });
+      mockDiscoveredResources([dbArn]);
+      rdsMock
+        .on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'starting' }] })
+        .resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
+      rdsMock.on(StartDBInstanceCommand).resolves({});
+
+      const context = createMockDurableContext();
+      await expect(handler(createEvent('Start'), context)).rejects.toThrow(
+        'wait timed out: type=db identifier=test-db maxWaitSeconds=120',
+      );
+      expect(context.wait).toHaveBeenCalledTimes(2);
+      expect(context.wait).toHaveBeenCalledWith({ seconds: 60 });
+      expect(rdsMock).toHaveReceivedCommandTimes(StartDBInstanceCommand, 1);
+    });
+
+    it('posts a Slack timeout message when notification is enabled', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 60, NOTIFY_SLACK_ON_WAIT_TIMEOUT: true });
+      mockDiscoveredResources([dbArn]);
+      rdsMock
+        .on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'starting' }] })
+        .resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
+
+      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+        'wait timed out: type=db identifier=test-db maxWaitSeconds=60',
+      );
+      expect(mockPostMessage).toHaveBeenCalledTimes(2);
+      expect(mockPostMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        channel: 'C12345678',
+        thread_ts: '1234567890.123456',
+        attachments: [
+          expect.objectContaining({
+            color: '#e01e5a',
+            pretext: 'The RDS db test-db did not reach the target state within the wait limit.',
+            fields: expect.arrayContaining([
+              { title: 'Identifier', value: 'test-db', short: true },
+              { title: 'Status', value: 'TIMED_OUT', short: true },
+              { title: 'Max wait (seconds)', value: '60', short: true },
+            ]),
+          }),
+        ],
+      }));
+    });
+
+    it('skips the Slack timeout message when notification is disabled', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 60, NOTIFY_SLACK_ON_WAIT_TIMEOUT: false });
+      mockDiscoveredResources([clusterArn]);
+      rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'stopping' }] });
+
+      await expect(handler(createEvent('Stop'), createMockDurableContext())).rejects.toThrow(
+        'wait timed out: type=cluster identifier=test-cluster maxWaitSeconds=60',
+      );
+      expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws on invalid wait settings before calling RDS', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 1.5 });
+
+      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+        'resourceWait.intervalSeconds must be a positive integer',
+      );
+      expect(rdsMock).not.toHaveReceivedCommand(DescribeDBInstancesCommand);
+    });
+  });
+
+  describe('wait timeout without Slack', () => {
+    beforeEach(() => {
+      mockEnv({
+        SLACK_SECRET_NAME: '',
+        NOTIFY_SLACK_ON_WAIT_TIMEOUT: false,
+        WAIT_INTERVAL_SECONDS: 60,
+        MAX_WAIT_SECONDS: 60,
+      });
+    });
+
+    it('throws without fetching a secret or posting to Slack', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'starting' }],
+      });
+
+      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+        'wait timed out: type=db identifier=test-db maxWaitSeconds=60',
+      );
+      expect(secretFetcher.getSecretValue).not.toHaveBeenCalled();
+      expect(mockPostMessage).not.toHaveBeenCalled();
     });
   });
 });
