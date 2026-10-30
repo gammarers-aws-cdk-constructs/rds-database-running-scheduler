@@ -1,5 +1,9 @@
 import { BatchItemStatus, type BatchResult, type DurableContext } from '@aws/durable-execution-sdk-js';
 import {
+  DescribeRegionsCommand,
+  EC2Client,
+} from '@aws-sdk/client-ec2';
+import {
   DescribeDBClustersCommand,
   DescribeDBInstancesCommand,
   RDSClient,
@@ -57,6 +61,7 @@ const mockEnv = (
     SLACK_SECRET_NAME: 'example/slack/webhook',
     WAIT_INTERVAL_SECONDS: 60,
     MAX_WAIT_SECONDS: 1800,
+    TARGET_REGIONS: '[]',
     NOTIFY_SLACK_ON_WAIT_TIMEOUT: true,
     ...overrides,
   };
@@ -218,14 +223,23 @@ const mockDiscoveredResources = (arns: string[]): void => {
   });
 };
 
+const mockEnabledRegions = (regions: string[]): void => {
+  ec2Mock.on(DescribeRegionsCommand).resolves({
+    Regions: regions.map((RegionName) => ({ RegionName })),
+  });
+};
+
 const rdsMock = mockClient(RDSClient);
 const taggingMock = mockClient(ResourceGroupsTaggingAPIClient);
+const ec2Mock = mockClient(EC2Client);
 
 describe('running-schedule.lambda', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     rdsMock.reset();
     taggingMock.reset();
+    ec2Mock.reset();
+    mockEnabledRegions([REGION]);
 
     mockEnv();
     (secretFetcher.getSecretValue as jest.Mock).mockResolvedValue({
@@ -250,6 +264,87 @@ describe('running-schedule.lambda', () => {
 
       expect(result).toEqual({ processed: 0, results: [] });
       expect(mockPostMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resource discovery regions', () => {
+    const otherRegion = 'us-east-1';
+    const otherDbArn = `arn:aws:rds:${otherRegion}:${ACCOUNT}:db:other-db`;
+
+    // Answers each tag search with the resources of the region the client was built for.
+    const mockTaggedResourcesByRegion = (arnsByRegion: Record<string, string[]>): void => {
+      taggingMock.on(GetResourcesCommand).callsFake(async (_input, getClient) => {
+        const region = await getClient().config.region();
+        return { ResourceTagMappingList: (arnsByRegion[region] ?? []).map((arn) => ({ ResourceARN: arn })) };
+      });
+    };
+
+    const searchedRegions = async (): Promise<string[]> => {
+      const regions: string[] = [];
+      for (const call of taggingMock.commandCalls(GetResourcesCommand)) {
+        regions.push(await call.thisValue.config.region());
+      }
+      return regions;
+    };
+
+    beforeEach(() => {
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'available' }],
+      });
+    });
+
+    it('searches every enabled region and processes resources found in other regions', async () => {
+      mockEnabledRegions([REGION, otherRegion]);
+      mockTaggedResourcesByRegion({ [REGION]: [dbArn], [otherRegion]: [otherDbArn] });
+
+      const result = await handler(createEvent('Start'), createMockDurableContext());
+
+      expect(await searchedRegions()).toEqual([REGION, otherRegion]);
+      expect(result.processed).toBe(2);
+      expect(result.results.map((r) => r.region)).toEqual([REGION, otherRegion]);
+      expect(result.results.map((r) => r.resource)).toEqual([dbArn, otherDbArn]);
+    });
+
+    it('searches only the regions named by TARGET_REGIONS', async () => {
+      mockEnv({ TARGET_REGIONS: JSON.stringify([otherRegion]) });
+      mockEnabledRegions([REGION, otherRegion]);
+      mockTaggedResourcesByRegion({ [REGION]: [dbArn], [otherRegion]: [otherDbArn] });
+
+      const result = await handler(createEvent('Start'), createMockDurableContext());
+
+      expect(await searchedRegions()).toEqual([otherRegion]);
+      expect(result.results.map((r) => r.resource)).toEqual([otherDbArn]);
+    });
+
+    it('reads every page of tagged resources in a region', async () => {
+      taggingMock
+        .on(GetResourcesCommand)
+        .resolvesOnce({
+          PaginationToken: 'next-page',
+          ResourceTagMappingList: [{ ResourceARN: dbArn }],
+        })
+        .resolvesOnce({
+          PaginationToken: '',
+          ResourceTagMappingList: [{ ResourceARN: clusterArn }],
+        });
+      rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'available' }] });
+
+      const result = await handler(createEvent('Start'), createMockDurableContext());
+
+      const calls = taggingMock.commandCalls(GetResourcesCommand);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.args[0].input.PaginationToken).toBeUndefined();
+      expect(calls[1]?.args[0].input.PaginationToken).toBe('next-page');
+      expect(result.results.map((r) => r.resource)).toEqual([dbArn, clusterArn]);
+    });
+
+    it('fails before searching when TARGET_REGIONS names a region that is not enabled', async () => {
+      mockEnv({ TARGET_REGIONS: JSON.stringify([otherRegion]) });
+
+      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+        RdsDatabaseRunningSchedulerValidateError,
+      );
+      expect(taggingMock).not.toHaveReceivedCommand(GetResourcesCommand);
     });
   });
 

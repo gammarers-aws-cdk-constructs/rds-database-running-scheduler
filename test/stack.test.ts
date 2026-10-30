@@ -321,6 +321,84 @@ describe('RDSDatabaseRunningScheduleStack', () => {
     });
   });
 
+  describe('target regions', () => {
+    it('Should search every enabled region by default', () => {
+      const app = new App();
+      const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', baseProps);
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            TARGET_REGIONS: '[]',
+          }),
+        },
+      });
+    });
+
+    it('Should pass the requested regions to the Lambda', () => {
+      const app = new App();
+      const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+        ...baseProps,
+        targetRegions: ['ap-northeast-1', 'us-east-1'],
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            TARGET_REGIONS: '["ap-northeast-1","us-east-1"]',
+          }),
+        },
+      });
+    });
+
+    it('Should allow listing the enabled regions without resource-level restriction', () => {
+      const app = new App();
+      const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', baseProps);
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'DescribeRegions',
+              Action: 'ec2:DescribeRegions',
+              Effect: 'Allow',
+              Resource: '*',
+            }),
+          ]),
+        },
+      });
+    });
+
+    it.each([
+      {
+        name: 'is empty',
+        targetRegions: [],
+        message: 'targetRegions must not be empty when specified',
+      },
+      {
+        name: 'contains a blank name',
+        targetRegions: ['us-east-1', ' '],
+        message: 'targetRegions must not contain blank region names',
+      },
+      {
+        name: 'contains a duplicate name',
+        targetRegions: ['us-east-1', 'us-east-1'],
+        message: 'targetRegions must not contain duplicate region names',
+      },
+    ])('Should throw when targetRegions $name', ({ targetRegions, message }) => {
+      const app = new App();
+      expect(() => {
+        new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+          ...baseProps,
+          targetRegions,
+        });
+      }).toThrow(message);
+    });
+  });
+
   describe('resource wait', () => {
     it('Should set custom wait environment variables', () => {
       const app = new App();

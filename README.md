@@ -12,7 +12,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 ## Features
 
 - **Tag-based targeting**: Start and stop RDS DB instances and Aurora clusters that match a given tag key and values.
-- **Account-wide discovery**: Finds tagged RDS resources across all regions in the deployment account.
+- **Multi-region discovery**: Searches every region enabled for the account, one region at a time, for tagged RDS resources. Set `targetRegions` to search only the regions you list.
 - **Cluster-priority deduplication**: When tag discovery returns both an Aurora cluster and its member DB instances, only the cluster is processed to avoid conflicting start/stop operations.
 - **Region-aware RDS control**: Creates per-region RDS clients from each resource ARN so cross-region resources are handled correctly.
 - **EventBridge Scheduler**: Cron-based start and stop schedules with configurable timezone, time, and weekdays.
@@ -25,7 +25,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 
 EventBridge Scheduler runs a start cron and a stop cron. Each one invokes a durable Lambda function. A failed invocation is retried at most twice, and only while the original event is less than 2 hours old. That window matches the durable execution timeout and is not configurable via props today. On the default schedule it ends before the opposite cron, so a failed stop is not run again after the next start.
 
-The function searches the deployment account for RDS DB instances and Aurora clusters that match `targetResource`. When both a cluster and its member instances match, only the cluster is controlled. Each remaining resource is started or stopped in the region taken from its ARN.
+The function lists the regions enabled for the account and searches each one with the Resource Groups Tagging API for RDS DB instances and Aurora clusters that match `targetResource`. The Tagging API returns only the resources of the region it is called in, so each region is searched separately. When `targetRegions` is set, only those regions are searched. When both a cluster and its member instances match, only the cluster is controlled. Each remaining resource is started or stopped in the region taken from its ARN.
 
 The function then checks that resource every `resourceWait.intervalSeconds` until it is available or stopped, or until `resourceWait.maxSeconds` elapses. A stop also waits through `storage-optimization`. A start that sees `storage-optimization` waits until the status is `stopped`, then starts the database. `configuring-iam-database-auth` and `configuring-log-exports` are waited on the same way. When Slack is enabled, it posts progress and, by default, a message when the wait limit is exceeded.
 
@@ -61,7 +61,16 @@ new RDSDatabaseRunningScheduler(scope, 'RDSDatabaseRunningScheduler', {
 });
 ```
 
-This uses the default schedules: start at 07:50 UTC and stop at 19:05 UTC, Monday–Friday. Slack notifications are off.
+This uses the default schedules: start at 07:50 UTC and stop at 19:05 UTC, Monday–Friday. Slack notifications are off. Every region enabled for the account is searched.
+
+To search only some regions, list them in `targetRegions`:
+
+```typescript
+new RDSDatabaseRunningScheduler(scope, 'RDSDatabaseRunningScheduler', {
+  targetResource: { tagKey: 'WorkHoursRunning', tagValues: ['YES'] },
+  targetRegions: ['ap-northeast-1', 'us-east-1'],
+});
+```
 
 With Slack notifications and a custom schedule:
 
@@ -113,6 +122,7 @@ When Slack is enabled, the secret in AWS Secrets Manager must contain JSON with 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `targetResource` | `TargetResource` | Yes | Tag key and values used to select RDS resources. |
+| `targetRegions` | `string[]` | No | Regions to search for tagged RDS resources. Each must be a region enabled for the account. Must not be empty, blank, or contain duplicates. Default: every region enabled for the account. |
 | `notification` | `Notification` | No | Notification channels. Set `notification.slack.enable` to `SlackNotificationEnable.ENABLED` to send Slack messages. |
 | `resourceWait` | `ResourceWait` | No | Per-resource status-check interval and maximum wait. Default: 60-second interval, 1800-second maximum. |
 | `enableScheduling` | `SchedulingEnable` | No | Whether start and stop schedules are enabled. `ENABLED` or `DISABLED`. Default: `ENABLED`. |
@@ -165,7 +175,7 @@ See [API.md](./API.md).
 - **Node.js**: >= 20.0.0
 - **AWS CDK**: ^2.232.0
 - **constructs**: ^10.5.1
-- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, and CloudWatch Logs; RDS describe/start/stop permissions for targeted resources. Start/stop IAM is scoped to DB instance and cluster ARNs in the account and to `aws:ResourceTag` matching `targetResource`. Resource Groups Tagging API access is required for resource discovery. Secrets Manager access is required only when Slack notifications are enabled.
+- **AWS**: Account and region with permissions to create EventBridge Scheduler, Lambda, IAM, and CloudWatch Logs; RDS describe/start/stop permissions for targeted resources. Start/stop IAM is scoped to DB instance and cluster ARNs in the account and to `aws:ResourceTag` matching `targetResource`. Resource Groups Tagging API access (`tag:GetResources`) and `ec2:DescribeRegions` are required for resource discovery. Secrets Manager access is required only when Slack notifications are enabled.
 
 ## License
 

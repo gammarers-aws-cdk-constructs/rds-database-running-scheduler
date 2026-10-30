@@ -131,6 +131,13 @@ export interface RDSDatabaseRunningSchedulerProps {
   /** Tag filter to select RDS instances and clusters. */
   readonly targetResource: TargetResource;
   /**
+   * Regions searched for tagged RDS instances and clusters.
+   * Each name must be a region enabled for the account. When specified, the array
+   * must not be empty and must not contain blank or duplicate names.
+   * @default - every region enabled for the account
+   */
+  readonly targetRegions?: string[];
+  /**
    * Enables or disables both start and stop schedules.
    * @default SchedulingEnable.ENABLED
    */
@@ -234,6 +241,32 @@ const resolveResourceWait = (
 };
 
 /**
+ * Validates the regions to search during synthesis.
+ *
+ * Throws a plain `Error` because this runs on the jsii surface. The handler
+ * checks the same limits and throws its own error type.
+ *
+ * @param targetRegions Regions from construct props, or `undefined` for every enabled region.
+ * @returns The same regions, or an empty array when every enabled region is searched.
+ * @throws {Error} When the array is empty, or contains a blank or duplicate region name.
+ */
+const resolveTargetRegions = (targetRegions: string[] | undefined): string[] => {
+  if (targetRegions === undefined) {
+    return [];
+  }
+  if (targetRegions.length === 0) {
+    throw new Error('targetRegions must not be empty when specified');
+  }
+  if (targetRegions.some((region) => region.trim().length === 0)) {
+    throw new Error('targetRegions must not contain blank region names');
+  }
+  if (new Set(targetRegions).size !== targetRegions.length) {
+    throw new Error('targetRegions must not contain duplicate region names');
+  }
+  return targetRegions;
+};
+
+/**
  * Account-wide RDS DB instance and cluster ARNs used to scope start/stop IAM.
  * Region is `*` because tagged resources may live outside the stack region.
  *
@@ -274,10 +307,11 @@ const SCHEDULE_MAX_EVENT_AGE = Duration.hours(2);
  * CDK construct that provisions a durable Lambda workflow and EventBridge
  * schedules to start/stop tagged RDS databases and clusters.
  *
- * The Lambda discovers matching resources account-wide via the Resource Groups
- * Tagging API, deduplicates Aurora cluster member instances when the parent
- * cluster is also tagged, and controls each remaining resource using the
- * region encoded in its ARN. Each resource is checked on a configurable interval
+ * The Lambda lists the regions enabled for the account, searches each one with
+ * the Resource Groups Tagging API (or only the regions in `targetRegions`),
+ * deduplicates Aurora cluster member instances when the parent cluster is also
+ * tagged, and controls each remaining resource using the region encoded in its
+ * ARN. Each resource is checked on a configurable interval
  * until it reaches a stable state or the per-resource wait limit. A failed
  * schedule invocation is retried at most twice, and only while the original
  * event is less than 2 hours old, so a stop failure is not replayed after the
@@ -302,6 +336,7 @@ export class RDSDatabaseRunningScheduler extends Construct {
       props.resourceWait?.intervalSeconds ?? DEFAULT_WAIT_INTERVAL_SECONDS,
       props.resourceWait?.maxSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
     );
+    const targetRegions = resolveTargetRegions(props.targetRegions);
     let notifySlackOnWaitTimeout = WaitTimeoutNotification.DISABLED;
     if (slackNotification.state === SlackNotificationEnable.ENABLED) {
       notifySlackOnWaitTimeout = slackNotification.notifyOnWaitTimeout;
@@ -321,6 +356,7 @@ export class RDSDatabaseRunningScheduler extends Construct {
       environment: {
         WAIT_INTERVAL_SECONDS: String(resourceWait.intervalSeconds),
         MAX_WAIT_SECONDS: String(resourceWait.maxSeconds),
+        TARGET_REGIONS: JSON.stringify(targetRegions),
         NOTIFY_SLACK_ON_WAIT_TIMEOUT: notifySlackOnWaitTimeout === WaitTimeoutNotification.ENABLED ? 'true' : 'false',
         ...(slackNotification.state === SlackNotificationEnable.ENABLED
           ? { SLACK_SECRET_NAME: slackNotification.secretName }
@@ -355,6 +391,15 @@ export class RDSDatabaseRunningScheduler extends Construct {
       effect: iam.Effect.ALLOW,
       actions: [
         'tag:GetResources',
+      ],
+      resources: ['*'],
+    }));
+    // DescribeRegions does not support resource-level IAM. It lists the regions to search.
+    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'DescribeRegions',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'ec2:DescribeRegions',
       ],
       resources: ['*'],
     }));

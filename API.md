@@ -6,14 +6,18 @@
 
 CDK construct that provisions a durable Lambda workflow and EventBridge schedules to start/stop tagged RDS databases and clusters.
 
-The Lambda discovers matching resources account-wide via the Resource Groups
-Tagging API, deduplicates Aurora cluster member instances when the parent
-cluster is also tagged, and controls each remaining resource using the
-region encoded in its ARN. Each resource is checked on a configurable interval
-until it reaches a stable state or the per-resource wait limit. When Slack is
-enabled, the Lambda posts progress and results to Slack, and can post a timeout
-message when the wait limit is exceeded. Otherwise Secrets Manager lookup, Slack
-API calls, and related IAM grants are skipped.
+The Lambda lists the regions enabled for the account, searches each one with
+the Resource Groups Tagging API (or only the regions in `targetRegions`),
+deduplicates Aurora cluster member instances when the parent cluster is also
+tagged, and controls each remaining resource using the region encoded in its
+ARN. Each resource is checked on a configurable interval
+until it reaches a stable state or the per-resource wait limit. A failed
+schedule invocation is retried at most twice, and only while the original
+event is less than 2 hours old, so a stop failure is not replayed after the
+next start. When Slack is enabled, the Lambda posts progress and results to
+Slack, and can post a timeout message when the wait limit is exceeded.
+Otherwise Secrets Manager lookup, Slack API calls, and related IAM grants
+are skipped.
 
 #### Initializers <a name="Initializers" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer"></a>
 
@@ -156,7 +160,7 @@ The tree node.
 
 ### RDSDatabaseRunningScheduleStack <a name="RDSDatabaseRunningScheduleStack" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStack"></a>
 
-CDK stack that provisions scheduled start/stop control for tagged RDS resources in the deployment account.
+CDK stack that provisions scheduled start/stop control for tagged RDS resources in the enabled regions of the deployment account, or only in `targetRegions`.
 
 Delegates resource discovery, cluster-priority deduplication, start/stop
 execution, per-resource wait limits, and optional Slack notifications to
@@ -1176,6 +1180,7 @@ const rDSDatabaseRunningSchedulerProps: RDSDatabaseRunningSchedulerProps = { ...
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for stop schedule cron configuration. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetRegions">targetRegions</a></code> | <code>string[]</code> | Regions searched for tagged RDS instances and clusters. |
 
 ---
 
@@ -1257,6 +1262,22 @@ Optional override for stop schedule cron configuration.
 
 ---
 
+##### `targetRegions`<sup>Optional</sup> <a name="targetRegions" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetRegions"></a>
+
+```typescript
+public readonly targetRegions: string[];
+```
+
+- *Type:* string[]
+- *Default:* every region enabled for the account
+
+Regions searched for tagged RDS instances and clusters.
+
+Each name must be a region enabled for the account. When specified, the array
+must not be empty and must not contain blank or duplicate names.
+
+---
+
 ### RDSDatabaseRunningScheduleStackProps <a name="RDSDatabaseRunningScheduleStackProps" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps"></a>
 
 Properties for the RDS database running schedule stack.
@@ -1282,6 +1303,7 @@ const rDSDatabaseRunningScheduleStackProps: RDSDatabaseRunningScheduleStackProps
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for stop schedule cron configuration. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetRegions">targetRegions</a></code> | <code>string[]</code> | Regions searched for tagged RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.analyticsReporting">analyticsReporting</a></code> | <code>boolean</code> | Include runtime versioning information in this Stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.crossRegionReferences">crossRegionReferences</a></code> | <code>boolean</code> | Enable this flag to allow native cross region stack references. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.description">description</a></code> | <code>string</code> | A description of the stack. |
@@ -1372,6 +1394,22 @@ public readonly stopSchedule: Schedule;
 - *Type:* <a href="#rds-database-running-scheduler.Schedule">Schedule</a>
 
 Optional override for stop schedule cron configuration.
+
+---
+
+##### `targetRegions`<sup>Optional</sup> <a name="targetRegions" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetRegions"></a>
+
+```typescript
+public readonly targetRegions: string[];
+```
+
+- *Type:* string[]
+- *Default:* every region enabled for the account
+
+Regions searched for tagged RDS instances and clusters.
+
+Each name must be a region enabled for the account. When specified, the array
+must not be empty and must not contain blank or duplicate names.
 
 ---
 

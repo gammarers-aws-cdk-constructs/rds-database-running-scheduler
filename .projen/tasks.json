@@ -432,6 +432,7 @@
             "npm",
             "update",
             "@aws-sdk/client-cost-explorer",
+            "@aws-sdk/client-ec2",
             "@aws-sdk/client-lambda",
             "@aws-sdk/client-rds",
             "@aws-sdk/client-resource-groups-tagging-api",

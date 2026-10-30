@@ -3,6 +3,10 @@ import {
   withDurableExecution,
 } from '@aws/durable-execution-sdk-js';
 import {
+  DescribeRegionsCommand,
+  EC2Client,
+} from '@aws-sdk/client-ec2';
+import {
   DescribeDBClustersCommand,
   DescribeDBInstancesCommand,
   RDSClient,
@@ -23,6 +27,11 @@ import {
   DEFAULT_MAX_WAIT_SECONDS,
   DEFAULT_WAIT_INTERVAL_SECONDS,
 } from '../settings/consts';
+import {
+  nextPaginationToken,
+  parseTargetRegions,
+  selectTargetRegions,
+} from './core/running-schedule-discovery';
 import { RdsDatabaseRunningSchedulerTimeoutError } from './core/running-schedule-errors';
 import {
   collectClusterKeysFromArns,
@@ -148,6 +157,53 @@ const deduplicateTargetResources = async (arns: string[]): Promise<string[]> => 
   }
 
   return filterClusterMemberDbs(arns, dbClusterIdentifiers, clusterKeys);
+};
+
+/**
+ * Lists the regions enabled for the account.
+ *
+ * `DescribeRegions` returns only enabled regions by default, so regions that
+ * need an opt-in are included only after the account has opted in.
+ *
+ * @returns Enabled region names.
+ */
+const listEnabledRegions = async (): Promise<string[]> => {
+  const client = new EC2Client({});
+  const response = await client.send(new DescribeRegionsCommand({}));
+  return (response.Regions ?? []).map((r) => r.RegionName ?? '').filter(Boolean);
+};
+
+/**
+ * Finds RDS DB instance and cluster ARNs that carry the target tag in one region.
+ *
+ * The Resource Groups Tagging API returns only resources in the region of the
+ * client, so each region needs its own client. All result pages are read.
+ *
+ * @param region AWS region to search.
+ * @param tagKey Tag key to match.
+ * @param tagValues Tag values to match.
+ * @returns RDS resource ARNs found in the region.
+ */
+const findTaggedResourceArns = async (
+  region: string,
+  tagKey: string,
+  tagValues: string[],
+): Promise<string[]> => {
+  const client = new ResourceGroupsTaggingAPIClient({ region });
+  const arns: string[] = [];
+  let paginationToken: string | undefined;
+  do {
+    const response = await client.send(
+      new GetResourcesCommand({
+        ResourceTypeFilters: ['rds:db', 'rds:cluster'],
+        TagFilters: [{ Key: tagKey, Values: tagValues }],
+        PaginationToken: paginationToken,
+      }),
+    );
+    arns.push(...(response.ResourceTagMappingList ?? []).map((m: ResourceTagMapping) => m.ResourceARN ?? '').filter(Boolean));
+    paginationToken = nextPaginationToken(response.PaginationToken);
+  } while (paginationToken !== undefined);
+  return arns;
 };
 
 /**
@@ -314,15 +370,17 @@ const processing = async (
 };
 
 /**
- * Scheduled Lambda handler that discovers tagged RDS resources account-wide,
- * deduplicates Aurora cluster members in favor of cluster-level control,
- * applies start/stop actions with per-ARN region RDS clients, and optionally
- * posts progress/results to Slack.
+ * Scheduled Lambda handler that discovers tagged RDS resources in every enabled
+ * region of the account (or only in `TARGET_REGIONS`), deduplicates Aurora
+ * cluster members in favor of cluster-level control, applies start/stop actions
+ * with per-ARN region RDS clients, and optionally posts progress/results to Slack.
  *
- * Resource discovery uses the Lambda deployment region endpoint via
- * `ResourceGroupsTaggingAPIClient`; returned ARNs may refer to resources in
- * any region within the same account. When both a cluster and its member DB
- * instances match the tag filter, only the cluster ARN is processed.
+ * Resource discovery lists the enabled regions with `DescribeRegions`, then
+ * searches each region with its own `ResourceGroupsTaggingAPIClient`, because
+ * the Resource Groups Tagging API returns only resources in the region of the
+ * client. `TARGET_REGIONS` (a JSON array, default `[]`) narrows the search; an
+ * empty array searches every enabled region. When both a cluster and its member
+ * DB instances match the tag filter, only the cluster ARN is processed.
  * RDS API calls use the region embedded in each ARN.
  *
  * When `SLACK_SECRET_NAME` is set (by the CDK construct when `notification.slack.enable`
@@ -343,7 +401,9 @@ const processing = async (
  * @throws {Error} When required event parameters
  * (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
  * @throws {RdsDatabaseRunningSchedulerValidateError} When wait settings are not
- * positive integers within the allowed maximum.
+ * positive integers within the allowed maximum, when `TARGET_REGIONS` is not a
+ * JSON array of distinct region names, or when it names a region that is not
+ * enabled for the account.
  * @throws {RdsDatabaseRunningSchedulerTimeoutError} When a resource exceeds its wait budget.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
@@ -364,6 +424,9 @@ export const handler = withDurableExecution(
       { default: false },
     );
     const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
+    const requestedRegions = parseTargetRegions(
+      StrictEnvResolver.resolve('TARGET_REGIONS', StrictEnvType.String, { default: '[]' }),
+    );
 
     let slackClient: WebClient | undefined;
     let slackChannel: string | undefined;
@@ -375,16 +438,18 @@ export const handler = withDurableExecution(
       slackChannel = slackSecretValue.channel;
     }
 
-    const discoveredResources = await context.step('get-resources', async () => {
-      const client = new ResourceGroupsTaggingAPIClient({});
-      const response = await client.send(
-        new GetResourcesCommand({
-          ResourceTypeFilters: ['rds:db', 'rds:cluster'],
-          TagFilters: [{ Key: params.TagKey, Values: params.TagValues }],
-        }),
-      );
-      return (response.ResourceTagMappingList ?? []).map((m: ResourceTagMapping) => m.ResourceARN ?? '').filter(Boolean);
+    // Search every enabled region, or only the regions named by `targetRegions`.
+    const searchRegions = await context.step('get-target-regions', async () => {
+      return selectTargetRegions(await listEnabledRegions(), requestedRegions);
     });
+
+    const discoveredResources: string[] = [];
+    for (const region of searchRegions) {
+      const arns = await context.step(`get-resources-${region}`, async () => {
+        return findTaggedResourceArns(region, params.TagKey, params.TagValues);
+      });
+      discoveredResources.push(...arns);
+    }
 
     const targetResources = await context.step('deduplicate-target-resources', async () => {
       return deduplicateTargetResources(discoveredResources);

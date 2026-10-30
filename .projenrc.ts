@@ -4,7 +4,7 @@ const project = new ProjenCdkConstructLibrary({
   cdkVersion: '2.232.0',
   name: 'rds-database-running-scheduler',
   repositoryUrl: 'https://github.com/gammarers-aws-cdk-constructs/rds-database-running-scheduler.git',
-  description: 'This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources account-wide via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.',
+  description: 'This AWS CDK construct controls the start and stop of RDS DB instances and Aurora clusters based on resource tags. EventBridge Scheduler invokes a durable Lambda function on a cron schedule so databases run only during defined working hours. The Lambda discovers tagged resources in every enabled region of the account (or only in the regions given by targetRegions) via the Resource Groups Tagging API, deduplicates Aurora cluster member instances when the parent cluster is also tagged, and controls each remaining resource using the region encoded in its ARN. Default schedule: start 07:50 UTC, stop 19:05 UTC, Monday–Friday.',
   keywords: [
     'cdk',
     'aws',
@@ -19,6 +19,7 @@ const project = new ProjenCdkConstructLibrary({
     '@gammarers/projen-projects@^0.5.1',
     '@aws/durable-execution-sdk-js@^1.1.7',
     '@aws-sdk/client-cost-explorer@^3.1087.0',
+    '@aws-sdk/client-ec2@^3.1087.0',
     '@aws-sdk/client-lambda@^3.1087.0',
     '@aws-sdk/client-rds@^3.1087.0',
     '@aws-sdk/client-resource-groups-tagging-api@^3.1087.0',
