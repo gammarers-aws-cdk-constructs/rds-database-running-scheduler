@@ -17,7 +17,8 @@ event is less than 2 hours old, so a stop failure is not replayed after the
 next start. When Slack is enabled, the Lambda posts progress and results to
 Slack, and can post a timeout message when the wait limit is exceeded.
 Otherwise Secrets Manager lookup, Slack API calls, and related IAM grants
-are skipped.
+are skipped. When `failureDetection.enabled` is `true`, CloudWatch alarms
+watch the Lambda and the handler's failure logs.
 
 #### Initializers <a name="Initializers" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer"></a>
 
@@ -142,6 +143,7 @@ Any object.
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.property.node">node</a></code> | <code>constructs.Node</code> | The tree node. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.property.failureDetector">failureDetector</a></code> | <code>lambda-failure-detector.LambdaFailureDetector</code> | Failure detection alarms of the scheduler Lambda. |
 
 ---
 
@@ -154,6 +156,20 @@ public readonly node: Node;
 - *Type:* constructs.Node
 
 The tree node.
+
+---
+
+##### `failureDetector`<sup>Optional</sup> <a name="failureDetector" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.property.failureDetector"></a>
+
+```typescript
+public readonly failureDetector: LambdaFailureDetector;
+```
+
+- *Type:* lambda-failure-detector.LambdaFailureDetector
+
+Failure detection alarms of the scheduler Lambda.
+
+Undefined unless `failureDetection.enabled` is `true`.
 
 ---
 
@@ -1176,6 +1192,7 @@ const rDSDatabaseRunningSchedulerProps: RDSDatabaseRunningSchedulerProps = { ...
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.enableScheduling">enableScheduling</a></code> | <code><a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a></code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.failureDetection">failureDetection</a></code> | <code>lambda-failure-detector.LambdaFailureDetection</code> | Opt-in CloudWatch failure detection for the scheduler Lambda. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
@@ -1206,6 +1223,27 @@ public readonly enableScheduling: SchedulingEnable;
 - *Default:* SchedulingEnable.ENABLED
 
 Enables or disables both start and stop schedules.
+
+---
+
+##### `failureDetection`<sup>Optional</sup> <a name="failureDetection" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.failureDetection"></a>
+
+```typescript
+public readonly failureDetection: LambdaFailureDetection;
+```
+
+- *Type:* lambda-failure-detector.LambdaFailureDetection
+- *Default:* no failure detection resources are created
+
+Opt-in CloudWatch failure detection for the scheduler Lambda.
+
+Alarms are created only when `failureDetection.enabled` is `true`. They cover the
+Lambda `Errors` and `Throttles` metrics and three log-based signals from the handler:
+a resource wait timeout, an unexpected resource status, and any failed execution.
+A durable execution that fails inside the handler does not always raise the Lambda
+`Errors` metric, so the log-based alarms are the reliable signal for those failures.
+Set `alarmTopic` to attach an existing SNS topic to every alarm. The construct never
+creates an SNS topic, and without `alarmTopic` the alarms have no notification actions.
 
 ---
 
@@ -1299,6 +1337,7 @@ const rDSDatabaseRunningScheduleStackProps: RDSDatabaseRunningScheduleStackProps
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling">enableScheduling</a></code> | <code><a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a></code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.failureDetection">failureDetection</a></code> | <code>lambda-failure-detector.LambdaFailureDetection</code> | Opt-in CloudWatch failure detection for the scheduler Lambda. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
@@ -1341,6 +1380,27 @@ public readonly enableScheduling: SchedulingEnable;
 - *Default:* SchedulingEnable.ENABLED
 
 Enables or disables both start and stop schedules.
+
+---
+
+##### `failureDetection`<sup>Optional</sup> <a name="failureDetection" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.failureDetection"></a>
+
+```typescript
+public readonly failureDetection: LambdaFailureDetection;
+```
+
+- *Type:* lambda-failure-detector.LambdaFailureDetection
+- *Default:* no failure detection resources are created
+
+Opt-in CloudWatch failure detection for the scheduler Lambda.
+
+Alarms are created only when `failureDetection.enabled` is `true`. They cover the
+Lambda `Errors` and `Throttles` metrics and three log-based signals from the handler:
+a resource wait timeout, an unexpected resource status, and any failed execution.
+A durable execution that fails inside the handler does not always raise the Lambda
+`Errors` metric, so the log-based alarms are the reliable signal for those failures.
+Set `alarmTopic` to attach an existing SNS topic to every alarm. The construct never
+creates an SNS topic, and without `alarmTopic` the alarms have no notification actions.
 
 ---
 

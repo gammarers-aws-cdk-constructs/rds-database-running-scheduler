@@ -484,7 +484,7 @@ const processing = async (
  * RDS API calls use the region embedded in each ARN.
  *
  * When `SLACK_SECRET_NAME` is set (by the CDK construct when `notification.slack.enable`
- * is `true`), fetches the Slack secret through the AWS Parameters and Secrets Lambda
+ * is `ENABLED`), fetches the Slack secret through the AWS Parameters and Secrets Lambda
  * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. When unset or empty,
  * Slack notification steps are skipped. Requires a Lambda runtime with
  * `AWS_SESSION_TOKEN` and the Params and Secrets extension layer (attached by the
@@ -493,7 +493,11 @@ const processing = async (
  * `WAIT_INTERVAL_SECONDS` and `MAX_WAIT_SECONDS` control the per-resource status
  * check. When a resource exceeds the maximum, the handler posts a Slack timeout
  * message only when Slack is configured and `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is true,
- * then fails that resource.
+ * and logs the failure with a marker for the failure-detection alarms.
+ *
+ * A failed resource does not stop the others. After every resource was attempted,
+ * the first failure is rethrown so the execution fails. The durable SDK wraps that
+ * error (for example in a `ChildContextError`) and keeps its message.
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
@@ -503,7 +507,9 @@ const processing = async (
  * settings are not positive integers within the allowed maximum, when
  * `TARGET_REGIONS` is not a JSON array of distinct region names, or when it names
  * a region that is not enabled for the account.
- * @throws {RdsDatabaseRunningSchedulerTimeoutError} When a resource exceeds its wait budget.
+ * @throws {Error} When a resource times out ({@link RdsDatabaseRunningSchedulerTimeoutError}),
+ * reaches an unexpected status ({@link RdsDatabaseRunningSchedulerStatusError}), or fails
+ * for another reason, such as a missing DB instance.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
 const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
