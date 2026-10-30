@@ -27,7 +27,7 @@ EventBridge Scheduler runs a start cron and a stop cron. Each one invokes a dura
 
 The function searches the deployment account for RDS DB instances and Aurora clusters that match `targetResource`. When both a cluster and its member instances match, only the cluster is controlled. Each remaining resource is started or stopped in the region taken from its ARN.
 
-The function then checks that resource every `resourceWait.intervalSeconds` until it is available or stopped, or until `resourceWait.maxSeconds` elapses. When Slack is enabled, it posts progress and, by default, a message when the wait limit is exceeded.
+The function then checks that resource every `resourceWait.intervalSeconds` until it is available or stopped, or until `resourceWait.maxSeconds` elapses. A stop also waits through `storage-optimization`. A start that sees `storage-optimization` waits until the status is `stopped`, then starts the database. `configuring-iam-database-auth` and `configuring-log-exports` are waited on the same way. When Slack is enabled, it posts progress and, by default, a message when the wait limit is exceeded.
 
 ## Installation
 

@@ -185,7 +185,10 @@ const readErrorName = (err: unknown): string => {
  * Processes one RDS resource until it reaches a stable state or the wait budget is spent.
  *
  * The function checks status, triggers start/stop when needed, and waits while
- * the resource is transitioning. Each wait uses `intervalSeconds`. Accumulated
+ * the resource is transitioning. That includes `storage-optimization` after a
+ * stop, plus `configuring-iam-database-auth` and `configuring-log-exports`.
+ * A start that sees `storage-optimization` waits until the status is `stopped`,
+ * then starts the resource. Each wait uses `intervalSeconds`. Accumulated
  * waits stop at `maxSeconds`. Uses a region-specific RDS client derived from
  * the target ARN so resources outside the Lambda deployment region are handled
  * correctly.

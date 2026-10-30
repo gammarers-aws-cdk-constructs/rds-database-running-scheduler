@@ -9,6 +9,12 @@ import { MAX_WAIT_SECONDS_LIMIT } from '../../settings/consts';
 
 /**
  * RDS statuses that indicate an in-progress transition.
+ *
+ * A stop moves through `stopping` and `storage-optimization` before `stopped`.
+ * `configuring-iam-database-auth` and `configuring-log-exports` are transitional
+ * as well. The caller waits while any of these is current and does not issue
+ * start or stop. A start that sees `storage-optimization` waits until a later
+ * observation is `stopped`, then the `stopped` action issues start.
  */
 export const TRANSITIONING_STATES = [
   'starting',
@@ -16,6 +22,9 @@ export const TRANSITIONING_STATES = [
   'backing-up',
   'modifying',
   'stopping',
+  'storage-optimization',
+  'configuring-iam-database-auth',
+  'configuring-log-exports',
 ] as const;
 
 const TRANSITIONING_STATE_SET = new Set<string>(TRANSITIONING_STATES);
