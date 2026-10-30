@@ -1,5 +1,7 @@
-import { App, TimeZone } from 'aws-cdk-lib';
+import { App, Stack, TimeZone } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
+import { Topic } from 'aws-cdk-lib/aws-sns';
+import type { LambdaFailureDetection } from 'lambda-failure-detector';
 import {
   RDSDatabaseRunningScheduleStack,
   SchedulingEnable,
@@ -20,31 +22,73 @@ const baseProps = {
   },
 };
 
+/**
+ * Asserts the wiring every stack shares, so each case only checks what it changes.
+ *
+ * - Both schedules invoke the `live` alias of the single durable Lambda and retry within one cron window.
+ * - The Lambda has the durable execution settings.
+ * - The log group is kept after creation succeeds, and deleted only when its creation fails.
+ *
+ * @param template Synthesized template of the stack under test.
+ * @param state Expected `State` of both schedules.
+ */
+const expectSchedulerWiring = (template: Template, state: 'ENABLED' | 'DISABLED'): void => {
+  template.resourceCountIs('AWS::Scheduler::Schedule', 2);
+  template.resourceCountIs('AWS::Lambda::Function', 1);
+  template.resourceCountIs('AWS::Lambda::Alias', 1);
+
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    DurableConfig: {
+      ExecutionTimeout: 7200,
+      RetentionPeriodInDays: 1,
+    },
+  });
+  template.hasResourceProperties('AWS::Lambda::Alias', { Name: 'live' });
+
+  const [aliasLogicalId] = Object.keys(template.findResources('AWS::Lambda::Alias'));
+  template.allResourcesProperties('AWS::Scheduler::Schedule', {
+    State: state,
+    FlexibleTimeWindow: {
+      Mode: 'OFF',
+    },
+    Target: {
+      Arn: { Ref: aliasLogicalId },
+      RoleArn: Match.anyValue(),
+      Input: Match.anyValue(),
+      RetryPolicy: {
+        MaximumEventAgeInSeconds: 7200,
+        MaximumRetryAttempts: 2,
+      },
+    },
+  });
+
+  template.hasResource('AWS::Logs::LogGroup', {
+    DeletionPolicy: 'RetainExceptOnCreate',
+    UpdateReplacePolicy: 'Retain',
+    Properties: Match.objectLike({
+      RetentionInDays: 90,
+    }),
+  });
+};
+
 describe('RDSDatabaseRunningScheduleStack', () => {
   describe('default schedule with Slack', () => {
     const app = new App();
     const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', baseProps);
     const template = Template.fromStack(stack);
 
-    it('Should have 2 Schedules', () => {
-      template.resourceCountIs('AWS::Scheduler::Schedule', 2);
+    it('Should have the shared scheduler wiring with ENABLED schedules', () => {
+      expectSchedulerWiring(template, 'ENABLED');
     });
 
-    it('Should have Schedule with ENABLED and Lambda target', () => {
-      template.allResourcesProperties('AWS::Scheduler::Schedule', {
-        State: 'ENABLED',
-        FlexibleTimeWindow: {
-          Mode: 'OFF',
-        },
-        Target: {
-          Arn: Match.anyValue(),
-          RoleArn: Match.anyValue(),
-          Input: Match.anyValue(),
-          RetryPolicy: {
-            MaximumEventAgeInSeconds: 7200,
-            MaximumRetryAttempts: 2,
-          },
-        },
+    it('Should use the default start and stop cron', () => {
+      template.hasResourceProperties('AWS::Scheduler::Schedule', {
+        ScheduleExpression: 'cron(50 7 ? * MON-FRI *)',
+        ScheduleExpressionTimezone: 'Etc/UTC',
+      });
+      template.hasResourceProperties('AWS::Scheduler::Schedule', {
+        ScheduleExpression: 'cron(5 19 ? * MON-FRI *)',
+        ScheduleExpressionTimezone: 'Etc/UTC',
       });
     });
 
@@ -247,26 +291,8 @@ describe('RDSDatabaseRunningScheduleStack', () => {
     });
     const template = Template.fromStack(stack);
 
-    it('Should have 2 Schedules', () => {
-      template.resourceCountIs('AWS::Scheduler::Schedule', 2);
-    });
-
-    it('Should have all Schedules DISABLED', () => {
-      template.allResourcesProperties('AWS::Scheduler::Schedule', {
-        State: 'DISABLED',
-        FlexibleTimeWindow: {
-          Mode: 'OFF',
-        },
-        Target: {
-          Arn: Match.anyValue(),
-          RoleArn: Match.anyValue(),
-          Input: Match.anyValue(),
-          RetryPolicy: {
-            MaximumEventAgeInSeconds: 7200,
-            MaximumRetryAttempts: 2,
-          },
-        },
-      });
+    it('Should have the shared scheduler wiring with all Schedules DISABLED', () => {
+      expectSchedulerWiring(template, 'DISABLED');
     });
 
     it('Should match snapshot', () => {
@@ -294,25 +320,24 @@ describe('RDSDatabaseRunningScheduleStack', () => {
     });
     const template = Template.fromStack(stack);
 
-    it('Should have 2 Schedules', () => {
-      template.resourceCountIs('AWS::Scheduler::Schedule', 2);
+    it('Should have the shared scheduler wiring with ENABLED schedules', () => {
+      expectSchedulerWiring(template, 'ENABLED');
     });
 
-    it('Should have Schedule with ENABLED and Input', () => {
-      template.allResourcesProperties('AWS::Scheduler::Schedule', {
-        State: 'ENABLED',
-        FlexibleTimeWindow: {
-          Mode: 'OFF',
-        },
-        Target: {
-          Arn: Match.anyValue(),
-          RoleArn: Match.anyValue(),
-          Input: Match.anyValue(),
-          RetryPolicy: {
-            MaximumEventAgeInSeconds: 7200,
-            MaximumRetryAttempts: 2,
-          },
-        },
+    it('Should use the custom start and stop cron in the given time zone', () => {
+      template.hasResourceProperties('AWS::Scheduler::Schedule', {
+        ScheduleExpression: 'cron(55 8 ? * MON-FRI *)',
+        ScheduleExpressionTimezone: 'Asia/Tokyo',
+        Target: Match.objectLike({
+          Input: '{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}',
+        }),
+      });
+      template.hasResourceProperties('AWS::Scheduler::Schedule', {
+        ScheduleExpression: 'cron(5 19 ? * MON-FRI *)',
+        ScheduleExpressionTimezone: 'Asia/Tokyo',
+        Target: Match.objectLike({
+          Input: '{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}',
+        }),
       });
     });
 
@@ -459,6 +484,110 @@ describe('RDSDatabaseRunningScheduleStack', () => {
           resourceWait,
         });
       }).toThrow(message);
+    });
+  });
+
+  describe('failure detection', () => {
+    const alarmTopicArn = 'arn:aws:sns:ap-northeast-1:123456789012:alarm-topic';
+
+    const synthesize = (failureDetection?: LambdaFailureDetection): Template => {
+      const app = new App();
+      const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+        ...baseProps,
+        failureDetection,
+      });
+      return Template.fromStack(stack);
+    };
+
+    it.each([
+      { name: 'is omitted', failureDetection: undefined },
+      { name: 'is not enabled', failureDetection: {} },
+      { name: 'is explicitly disabled', failureDetection: { enabled: false } },
+    ])('Should create no alarms or metric filters when failure detection $name', ({ failureDetection }) => {
+      const template = synthesize(failureDetection);
+
+      template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
+      template.resourceCountIs('AWS::Logs::MetricFilter', 0);
+      template.resourceCountIs('AWS::SNS::Topic', 0);
+    });
+
+    describe('enabled without an alarm topic', () => {
+      const template = synthesize({ enabled: true });
+
+      it('Should alarm on the Lambda Errors and Throttles metrics', () => {
+        const [functionLogicalId] = Object.keys(template.findResources('AWS::Lambda::Function'));
+
+        for (const metricName of ['Errors', 'Throttles']) {
+          template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+            Namespace: 'AWS/Lambda',
+            MetricName: metricName,
+            Dimensions: [{ Name: 'FunctionName', Value: { Ref: functionLogicalId } }],
+          });
+        }
+      });
+
+      it.each([
+        'ResourceWaitTimedOut',
+        'ResourceStatusUnexpected',
+        'ScheduleExecutionFailed',
+      ])('Should filter the %s marker on the scheduler log group and alarm on its metric', (marker) => {
+        const [logGroupLogicalId] = Object.keys(template.findResources('AWS::Logs::LogGroup'));
+
+        template.hasResourceProperties('AWS::Logs::MetricFilter', {
+          LogGroupName: { Ref: logGroupLogicalId },
+          FilterPattern: `"${marker}"`,
+          MetricTransformations: [
+            Match.objectLike({
+              MetricNamespace: 'RDSDatabaseRunningScheduler',
+              MetricName: marker,
+              MetricValue: '1',
+            }),
+          ],
+        });
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+          Namespace: 'RDSDatabaseRunningScheduler',
+          MetricName: marker,
+        });
+      });
+
+      it('Should create only those alarms and filters, reusing the existing log group', () => {
+        template.resourceCountIs('AWS::CloudWatch::Alarm', 5);
+        template.resourceCountIs('AWS::Logs::MetricFilter', 3);
+        template.resourceCountIs('AWS::Logs::LogGroup', 1);
+      });
+
+      it('Should neither create an SNS topic nor attach alarm actions', () => {
+        template.resourceCountIs('AWS::SNS::Topic', 0);
+        template.allResourcesProperties('AWS::CloudWatch::Alarm', {
+          AlarmActions: Match.absent(),
+        });
+      });
+
+      it('Should keep the shared scheduler wiring', () => {
+        expectSchedulerWiring(template, 'ENABLED');
+      });
+    });
+
+    describe('enabled with an alarm topic', () => {
+      const app = new App();
+      const topicStack = new Stack(app, 'TopicStack');
+      const alarmTopic = Topic.fromTopicArn(topicStack, 'AlarmTopic', alarmTopicArn);
+      const stack = new RDSDatabaseRunningScheduleStack(app, 'RDSDatabaseRunningScheduleStack', {
+        ...baseProps,
+        failureDetection: { enabled: true, alarmTopic },
+      });
+      const template = Template.fromStack(stack);
+
+      it('Should notify the given topic from every alarm without creating a topic', () => {
+        template.resourceCountIs('AWS::SNS::Topic', 0);
+        template.allResourcesProperties('AWS::CloudWatch::Alarm', {
+          AlarmActions: [alarmTopicArn],
+        });
+      });
+
+      it('Should match snapshot', () => {
+        expect(template.toJSON()).toMatchSnapshot();
+      });
     });
   });
 });

@@ -15,9 +15,13 @@ const project = new ProjenCdkConstructLibrary({
     'cluster',
     'instance',
   ],
+  peerDeps: [
+    'lambda-failure-detector@^0.2.1',
+  ],
   devDeps: [
     '@gammarers/projen-projects@^0.5.1',
-    '@aws/durable-execution-sdk-js@^1.1.7',
+    '@aws/durable-execution-sdk-js@^2.7.1',
+    '@aws/durable-execution-sdk-js-testing@^1.3.2',
     '@aws-sdk/client-cost-explorer@^3.1087.0',
     '@aws-sdk/client-ec2@^3.1087.0',
     '@aws-sdk/client-lambda@^3.1087.0',

@@ -2,10 +2,30 @@
  * Pure wait decisions for a single RDS resource.
  *
  * These helpers do not read the clock, environment, or AWS SDK. The Lambda
- * applies the returned step: finish, fail, time out, or pause for one interval.
+ * applies the returned step: finish or pause for one interval. An unexpected
+ * status or an exhausted wait budget is reported by throwing a package error.
  */
-import { RdsDatabaseRunningSchedulerValidateError } from './running-schedule-errors';
-import { MAX_WAIT_SECONDS_LIMIT } from '../../settings/consts';
+import {
+  RdsDatabaseRunningSchedulerStatusError,
+  RdsDatabaseRunningSchedulerTimeoutError,
+  RdsDatabaseRunningSchedulerValidateError,
+} from './running-schedule-errors';
+import {
+  MAX_WAIT_SECONDS_LIMIT,
+  RUNNING_MODE_START,
+  RUNNING_MODE_STOP,
+  type RunningMode,
+} from '../../settings/consts';
+
+/**
+ * Status labels the wait decisions compare against.
+ * `NOT_FOUND` is not an RDS status. The handler reports it when the resource is gone.
+ */
+export const RESOURCE_STATUS = {
+  AVAILABLE: 'available',
+  STOPPED: 'stopped',
+  NOT_FOUND: 'not-found',
+} as const;
 
 /**
  * RDS statuses that indicate an in-progress transition.
@@ -37,7 +57,7 @@ export type ResourceAction = 'not-found' | 'done' | 'start' | 'stop' | 'wait' | 
 /**
  * Whether the status-check loop should run another iteration.
  */
-export type WaitLoopSignal = 'open' | 'settled' | 'failed';
+export type WaitLoopSignal = 'open' | 'settled';
 
 /**
  * Command to issue before pausing, when the resource is not yet terminal.
@@ -48,9 +68,10 @@ export type WaitCommand = 'start' | 'stop' | 'none';
  * One decision after reading the current RDS status.
  */
 export type WaitStep =
-  | { readonly kind: 'finish'; readonly status: 'skipped' | 'available' | 'stopped' }
-  | { readonly kind: 'fail'; readonly current: string }
-  | { readonly kind: 'timed-out' }
+  | {
+    readonly kind: 'finish';
+    readonly status: 'skipped' | typeof RESOURCE_STATUS.AVAILABLE | typeof RESOURCE_STATUS.STOPPED;
+  }
   | { readonly kind: 'pause'; readonly command: WaitCommand };
 
 /**
@@ -80,22 +101,22 @@ export const isTransitioningState = (current: string): boolean =>
  * @returns Action to take before considering the wait budget.
  */
 export const decideResourceAction = (
-  mode: 'Start' | 'Stop',
+  mode: RunningMode,
   current: string,
 ): ResourceAction => {
-  if (current === 'not-found') {
+  if (current === RESOURCE_STATUS.NOT_FOUND) {
     return 'not-found';
   }
-  if (mode === 'Start' && current === 'available') {
+  if (mode === RUNNING_MODE_START && current === RESOURCE_STATUS.AVAILABLE) {
     return 'done';
   }
-  if (mode === 'Stop' && current === 'stopped') {
+  if (mode === RUNNING_MODE_STOP && current === RESOURCE_STATUS.STOPPED) {
     return 'done';
   }
-  if (mode === 'Start' && current === 'stopped') {
+  if (mode === RUNNING_MODE_START && current === RESOURCE_STATUS.STOPPED) {
     return 'start';
   }
-  if (mode === 'Stop' && current === 'available') {
+  if (mode === RUNNING_MODE_STOP && current === RESOURCE_STATUS.AVAILABLE) {
     return 'stop';
   }
   if (isTransitioningState(current)) {
@@ -119,38 +140,53 @@ export const hasWaitBudget = (
 ): boolean => elapsedWaitSeconds + intervalSeconds <= maxWaitSeconds;
 
 /**
+ * Options for {@link nextWaitStep}.
+ */
+export interface NextWaitStepOptions {
+  /** Requested operation mode. */
+  readonly mode: RunningMode;
+  /** Current RDS status, or `not-found` when the resource is gone. */
+  readonly current: string;
+  /** Seconds already spent waiting for this resource. */
+  readonly elapsedWaitSeconds: number;
+  /** Seconds the next wait would add. */
+  readonly intervalSeconds: number;
+  /** Maximum accumulated wait seconds for this resource. */
+  readonly maxWaitSeconds: number;
+  /** Resource description embedded in error messages, e.g. `type=db identifier=my-db`. */
+  readonly resourceLabel: string;
+}
+
+/**
  * Chooses the next step from the current status and remaining wait budget.
  *
  * A stable or missing resource finishes even when the budget is exhausted.
- * Start, stop, and transitioning statuses time out when the next interval
+ * Start, stop, and transitioning statuses throw when the next interval
  * would exceed the maximum.
  *
- * @param mode Requested operation mode.
- * @param current Current RDS status, or `not-found` when the resource is gone.
- * @param elapsedWaitSeconds Seconds already spent waiting for this resource.
- * @param intervalSeconds Seconds the next wait would add.
- * @param maxWaitSeconds Maximum accumulated wait seconds for this resource.
- * @returns Finish, fail, time out, or pause for one interval.
+ * @param options Current observation and wait budget for one resource.
+ * @returns Finish, or pause for one interval.
+ * @throws {RdsDatabaseRunningSchedulerStatusError} When the status cannot be handled for the mode.
+ * @throws {RdsDatabaseRunningSchedulerTimeoutError} When the next interval would exceed the wait budget.
  */
-export const nextWaitStep = (
-  mode: 'Start' | 'Stop',
-  current: string,
-  elapsedWaitSeconds: number,
-  intervalSeconds: number,
-  maxWaitSeconds: number,
-): WaitStep => {
+export const nextWaitStep = (options: NextWaitStepOptions): WaitStep => {
+  const { mode, current, elapsedWaitSeconds, intervalSeconds, maxWaitSeconds, resourceLabel } = options;
   const action = decideResourceAction(mode, current);
   if (action === 'not-found') {
     return { kind: 'finish', status: 'skipped' };
   }
-  if (action === 'done' && (current === 'available' || current === 'stopped')) {
+  if (action === 'done' && (current === RESOURCE_STATUS.AVAILABLE || current === RESOURCE_STATUS.STOPPED)) {
     return { kind: 'finish', status: current };
   }
   if (action === 'unexpected' || action === 'done') {
-    return { kind: 'fail', current };
+    throw new RdsDatabaseRunningSchedulerStatusError(
+      `db instance or cluster status fail: ${resourceLabel} current=${current}`,
+    );
   }
   if (!hasWaitBudget(elapsedWaitSeconds, intervalSeconds, maxWaitSeconds)) {
-    return { kind: 'timed-out' };
+    throw new RdsDatabaseRunningSchedulerTimeoutError(
+      `wait timed out: ${resourceLabel} maxWaitSeconds=${maxWaitSeconds}`,
+    );
   }
   if (action === 'start') {
     return { kind: 'pause', command: 'start' };
@@ -165,7 +201,7 @@ export const nextWaitStep = (
  * Returns whether the status-check loop should keep running.
  *
  * @param signal Loop signal after the latest status check.
- * @returns `true` only while no result and no failure have been recorded.
+ * @returns `true` only while no result has been recorded.
  */
 export const shouldContinueWaitLoop = (signal: WaitLoopSignal): boolean => signal === 'open';
 

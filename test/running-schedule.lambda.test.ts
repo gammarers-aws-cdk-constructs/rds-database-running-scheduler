@@ -1,4 +1,8 @@
-import { BatchItemStatus, type BatchResult, type DurableContext } from '@aws/durable-execution-sdk-js';
+import {
+  LocalDurableTestRunner,
+  OperationType,
+  type TestResult,
+} from '@aws/durable-execution-sdk-js-testing';
 import {
   DescribeRegionsCommand,
   EC2Client,
@@ -16,23 +20,16 @@ import {
   GetResourcesCommand,
   ResourceGroupsTaggingAPIClient,
 } from '@aws-sdk/client-resource-groups-tagging-api';
-import type { Context } from 'aws-lambda';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { mockClient } from 'aws-sdk-client-mock';
 import 'aws-sdk-client-mock-jest';
 import { StrictEnvResolver } from 'strict-env-resolver';
+import { handler } from '../src/funcs/running-schedule.lambda';
 import {
-  RdsDatabaseRunningSchedulerTimeoutError,
-  RdsDatabaseRunningSchedulerValidateError,
-} from '../src/funcs/core/running-schedule-errors';
-import { handler as runningScheduleHandler } from '../src/funcs/running-schedule.lambda';
-
-jest.mock('@aws/durable-execution-sdk-js', () => ({
-  ...jest.requireActual('@aws/durable-execution-sdk-js'),
-  withDurableExecution: <TEvent, TResult>(
-    handler: (event: TEvent, context: DurableContext) => Promise<TResult>,
-  ) => handler,
-}));
+  LOG_MARKER_RESOURCE_STATUS_UNEXPECTED,
+  LOG_MARKER_RESOURCE_WAIT_TIMED_OUT,
+  LOG_MARKER_SCHEDULE_EXECUTION_FAILED,
+} from '../src/settings/consts';
 
 jest.mock('aws-lambda-secret-fetcher', () => ({
   secretFetcher: {
@@ -97,13 +94,6 @@ interface ScheduleEvent {
   };
 }
 
-type HandlerFn = (
-  event: ScheduleEvent,
-  context: DurableContext,
-) => Promise<{ processed: number; results: ProcessingResult[] }>;
-
-const handler = runningScheduleHandler as unknown as HandlerFn;
-
 interface ProcessingResult {
   resource: string;
   status: string;
@@ -113,101 +103,10 @@ interface ProcessingResult {
   type: 'db' | 'cluster';
 }
 
-const createBatchResult = <T>(results: T[]): BatchResult<T> => ({
-  all: results.map((result, index) => ({
-    result,
-    index,
-    status: BatchItemStatus.SUCCEEDED,
-  })),
-  succeeded: () =>
-    results.map((result, index) => ({
-      result,
-      index,
-      status: BatchItemStatus.SUCCEEDED,
-    })),
-  failed: () => [],
-  started: () => [],
-  status: BatchItemStatus.SUCCEEDED,
-  completionReason: 'ALL_COMPLETED',
-  hasFailure: false,
-  throwIfError: () => undefined,
-  getResults: () => results,
-  getErrors: () => [],
-  successCount: results.length,
-  failureCount: 0,
-  startedCount: 0,
-  totalCount: results.length,
-});
-
-const createMockDurableContext = (): DurableContext => {
-  const ctx = {
-    lambdaContext: {} as Context,
-    logger: {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    },
-    executionContext: {
-      durableExecutionArn: 'arn:aws:lambda:ap-northeast-1:123456789012:function:test',
-    },
-    configureLogger: jest.fn(),
-    step: jest.fn(
-      async <TOutput>(
-        nameOrFn: string | (() => Promise<TOutput>),
-        maybeFn?: () => Promise<TOutput>,
-      ): Promise<TOutput> => {
-        const fn = typeof nameOrFn === 'function' ? nameOrFn : maybeFn;
-        if (!fn) {
-          throw new Error('step function is required');
-        }
-        return fn();
-      },
-    ),
-    wait: jest.fn(async () => undefined),
-    map: jest.fn(
-      async <TInput, TOutput>(
-        nameOrItems: string | TInput[],
-        mapFuncOrItems?: ((context: DurableContext, item: TInput, index: number) => Promise<TOutput>) | TInput[],
-        maybeMapFunc?: (context: DurableContext, item: TInput, index: number) => Promise<TOutput>,
-      ): Promise<BatchResult<TOutput>> => {
-        const items = Array.isArray(nameOrItems) ? nameOrItems : (mapFuncOrItems as TInput[]);
-        const mapFunc = (
-          Array.isArray(nameOrItems) ? mapFuncOrItems : maybeMapFunc
-        ) as (context: DurableContext, item: TInput, index: number) => Promise<TOutput>;
-        const results: TOutput[] = [];
-        for (let index = 0; index < items.length; index += 1) {
-          results.push(await mapFunc(ctx as unknown as DurableContext, items[index], index));
-        }
-        return createBatchResult(results);
-      },
-    ),
-    runInChildContext: jest.fn(
-      async <TOutput>(
-        nameOrFn: string | ((childCtx: DurableContext) => Promise<TOutput>),
-        maybeFn?: (childCtx: DurableContext) => Promise<TOutput>,
-      ): Promise<TOutput> => {
-        const fn = typeof nameOrFn === 'function' ? nameOrFn : maybeFn;
-        if (!fn) {
-          throw new Error('child context function is required');
-        }
-        return fn(ctx as unknown as DurableContext);
-      },
-    ),
-    invoke: jest.fn(),
-    waitForCondition: jest.fn(),
-    createCallback: jest.fn(),
-    waitForCallback: jest.fn(),
-    parallel: jest.fn(),
-    promise: {
-      all: jest.fn(),
-      allSettled: jest.fn(),
-      any: jest.fn(),
-      race: jest.fn(),
-    },
-  };
-  return ctx as unknown as DurableContext;
-};
+interface ScheduleResult {
+  processed: number;
+  results: ProcessingResult[];
+}
 
 const createEvent = (mode: 'Start' | 'Stop'): ScheduleEvent => ({
   Params: {
@@ -216,6 +115,10 @@ const createEvent = (mode: 'Start' | 'Stop'): ScheduleEvent => ({
     Mode: mode,
   },
 });
+
+const rdsMock = mockClient(RDSClient);
+const taggingMock = mockClient(ResourceGroupsTaggingAPIClient);
+const ec2Mock = mockClient(EC2Client);
 
 const mockDiscoveredResources = (arns: string[]): void => {
   taggingMock.on(GetResourcesCommand).resolves({
@@ -229,11 +132,69 @@ const mockEnabledRegions = (regions: string[]): void => {
   });
 };
 
-const rdsMock = mockClient(RDSClient);
-const taggingMock = mockClient(ResourceGroupsTaggingAPIClient);
-const ec2Mock = mockClient(EC2Client);
+/**
+ * Lines the durable logger wrote to stdout/stderr, collected while a run is in progress.
+ */
+const writtenLogLines: string[] = [];
+
+const collectWrites = (chunk: unknown): void => {
+  writtenLogLines.push(String(chunk));
+};
+
+interface Run {
+  readonly runner: LocalDurableTestRunner<ScheduleResult>;
+  readonly execution: TestResult<ScheduleResult>;
+}
+
+const invoke = async (event: ScheduleEvent): Promise<Run> => {
+  const runner = new LocalDurableTestRunner<ScheduleResult>({ handlerFunction: handler });
+  const execution = await runner.run({ payload: event });
+  return { runner, execution };
+};
+
+/**
+ * Runs the handler and expects the execution to succeed.
+ */
+const runToSuccess = async (mode: 'Start' | 'Stop'): Promise<{ run: Run; result: ScheduleResult }> => {
+  const run = await invoke(createEvent(mode));
+  expect(run.execution.getStatus()).toBe('SUCCEEDED');
+  const result = run.execution.getResult();
+  if (result === undefined) {
+    throw new Error('the execution succeeded without a result');
+  }
+  return { run, result };
+};
+
+/**
+ * Runs the handler and expects the execution to fail.
+ */
+const runToFailure = async (event: ScheduleEvent) => {
+  const run = await invoke(event);
+  expect(run.execution.getStatus()).toBe('FAILED');
+  return { run, error: run.execution.getError() };
+};
+
+/**
+ * Names and durations of the `context.wait` calls, in the order they started.
+ */
+const waitsOf = (execution: TestResult<ScheduleResult>): Array<{ name: string | undefined; seconds: number | undefined }> => {
+  return execution
+    .getOperations()
+    .filter((operation) => operation.getType() === OperationType.WAIT)
+    .map((operation) => ({ name: operation.getName(), seconds: operation.getWaitDetails()?.waitSeconds }));
+};
+
+const loggedMessages = (): string => writtenLogLines.join('');
 
 describe('running-schedule.lambda', () => {
+  beforeAll(async () => {
+    await LocalDurableTestRunner.setupTestEnvironment({ skipTime: true });
+  });
+
+  afterAll(async () => {
+    await LocalDurableTestRunner.teardownTestEnvironment();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     rdsMock.reset();
@@ -246,21 +207,36 @@ describe('running-schedule.lambda', () => {
       token: 'xoxb-test-token',
       channel: 'C12345678',
     });
+
+    writtenLogLines.length = 0;
+    jest.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      collectWrites(chunk);
+      return true;
+    });
+    jest.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      collectWrites(chunk);
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('handler validation', () => {
-    it('throws when required event parameters are missing', async () => {
-      const context = createMockDurableContext();
-      await expect(handler({ Params: {} as ScheduleEvent['Params'] }, context)).rejects.toThrow(
+    it('fails when required event parameters are missing', async () => {
+      const { error } = await runToFailure({ Params: {} as ScheduleEvent['Params'] });
+
+      expect(error.errorType).toBe('RdsDatabaseRunningSchedulerValidateError');
+      expect(error.errorMessage).toBe(
         'Invalid event: Params.TagKey, Params.TagValues, Params.Mode are required.',
       );
     });
 
     it('returns empty results when no resources are discovered', async () => {
       taggingMock.on(GetResourcesCommand).resolves({ ResourceTagMappingList: [] });
-      const context = createMockDurableContext();
 
-      const result = await handler(createEvent('Start'), context);
+      const { result } = await runToSuccess('Start');
 
       expect(result).toEqual({ processed: 0, results: [] });
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -297,7 +273,7 @@ describe('running-schedule.lambda', () => {
       mockEnabledRegions([REGION, otherRegion]);
       mockTaggedResourcesByRegion({ [REGION]: [dbArn], [otherRegion]: [otherDbArn] });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       expect(await searchedRegions()).toEqual([REGION, otherRegion]);
       expect(result.processed).toBe(2);
@@ -310,7 +286,7 @@ describe('running-schedule.lambda', () => {
       mockEnabledRegions([REGION, otherRegion]);
       mockTaggedResourcesByRegion({ [REGION]: [dbArn], [otherRegion]: [otherDbArn] });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       expect(await searchedRegions()).toEqual([otherRegion]);
       expect(result.results.map((r) => r.resource)).toEqual([otherDbArn]);
@@ -329,7 +305,7 @@ describe('running-schedule.lambda', () => {
         });
       rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'available' }] });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       const calls = taggingMock.commandCalls(GetResourcesCommand);
       expect(calls).toHaveLength(2);
@@ -341,8 +317,10 @@ describe('running-schedule.lambda', () => {
     it('fails before searching when TARGET_REGIONS names a region that is not enabled', async () => {
       mockEnv({ TARGET_REGIONS: JSON.stringify([otherRegion]) });
 
-      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
-        RdsDatabaseRunningSchedulerValidateError,
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toBe(
+        `targetRegions contains regions that are not enabled for the account: ${otherRegion}`,
       );
       expect(taggingMock).not.toHaveReceivedCommand(GetResourcesCommand);
     });
@@ -362,7 +340,7 @@ describe('running-schedule.lambda', () => {
         DBInstances: [{ DBInstanceStatus: 'available' }],
       });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       expect(result.results[0]?.status).toBe('available');
       expect(secretFetcher.getSecretValue).not.toHaveBeenCalled();
@@ -377,7 +355,7 @@ describe('running-schedule.lambda', () => {
         DBInstances: [{ DBInstanceStatus: 'available' }],
       });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       expect(result.results[0]).toMatchObject({
         resource: dbArn,
@@ -399,14 +377,13 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available' }] });
       rdsMock.on(StartDBInstanceCommand).resolves({});
 
-      const context = createMockDurableContext();
-      const result = await handler(createEvent('Start'), context);
+      const { run, result } = await runToSuccess('Start');
 
       expect(result.results[0]?.status).toBe('available');
       expect(rdsMock).toHaveReceivedCommandWith(StartDBInstanceCommand, {
         DBInstanceIdentifier: 'test-db',
       });
-      expect(context.wait).toHaveBeenCalledWith({ seconds: 60 });
+      expect(waitsOf(run.execution)).toEqual([{ name: 'wait-db-test-db-0', seconds: 60 }]);
     });
 
     it('starts a stopped cluster and returns available', async () => {
@@ -417,7 +394,7 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBClusters: [{ Status: 'available' }] });
       rdsMock.on(StartDBClusterCommand).resolves({});
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       expect(result.results[0]?.status).toBe('available');
       expect(rdsMock).toHaveReceivedCommandWith(StartDBClusterCommand, {
@@ -431,11 +408,12 @@ describe('running-schedule.lambda', () => {
         DBInstances: [{ DBInstanceStatus: 'available' }],
       });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { run, result } = await runToSuccess('Start');
 
       expect(result.results[0]?.status).toBe('available');
       expect(rdsMock).not.toHaveReceivedCommand(StartDBInstanceCommand);
       expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+      expect(waitsOf(run.execution)).toEqual([]);
     });
   });
 
@@ -448,7 +426,7 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] });
       rdsMock.on(StopDBInstanceCommand).resolves({});
 
-      const result = await handler(createEvent('Stop'), createMockDurableContext());
+      const { result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('stopped');
       expect(rdsMock).toHaveReceivedCommandWith(StopDBInstanceCommand, {
@@ -464,7 +442,7 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBClusters: [{ Status: 'stopped' }] });
       rdsMock.on(StopDBClusterCommand).resolves({});
 
-      const result = await handler(createEvent('Stop'), createMockDurableContext());
+      const { result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('stopped');
       expect(rdsMock).toHaveReceivedCommandWith(StopDBClusterCommand, {
@@ -478,7 +456,7 @@ describe('running-schedule.lambda', () => {
         DBClusters: [{ Status: 'stopped' }],
       });
 
-      const result = await handler(createEvent('Stop'), createMockDurableContext());
+      const { result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('stopped');
       expect(rdsMock).not.toHaveReceivedCommand(StopDBClusterCommand);
@@ -495,11 +473,13 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available' }] });
       rdsMock.on(StartDBInstanceCommand).resolves({});
 
-      const context = createMockDurableContext();
-      const result = await handler(createEvent('Start'), context);
+      const { run, result } = await runToSuccess('Start');
 
       expect(result.results[0]?.status).toBe('available');
-      expect(context.wait).toHaveBeenCalledWith({ seconds: 60 });
+      expect(waitsOf(run.execution)).toEqual([
+        { name: 'wait-db-test-db-0', seconds: 60 },
+        { name: 'wait-db-test-db-1', seconds: 60 },
+      ]);
       expect(rdsMock).toHaveReceivedCommandTimes(DescribeDBInstancesCommand, 3);
     });
 
@@ -512,12 +492,50 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBClusters: [{ Status: 'stopped' }] });
       rdsMock.on(StopDBClusterCommand).resolves({});
 
-      const context = createMockDurableContext();
-      const result = await handler(createEvent('Stop'), context);
+      const { run, result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('stopped');
-      expect(context.wait).toHaveBeenCalledWith({ seconds: 60 });
+      expect(waitsOf(run.execution)).toEqual([
+        { name: 'wait-cluster-test-cluster-0', seconds: 60 },
+        { name: 'wait-cluster-test-cluster-1', seconds: 60 },
+      ]);
       expect(rdsMock).toHaveReceivedCommandTimes(DescribeDBClustersCommand, 3);
+    });
+
+    it.each([
+      'storage-optimization',
+      'configuring-iam-database-auth',
+      'configuring-log-exports',
+    ])('waits for stopped while Start sees %s, then starts the DB instance', async (transitioning) => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock
+        .on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: transitioning }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available' }] });
+      rdsMock.on(StartDBInstanceCommand).resolves({});
+
+      const { run, result } = await runToSuccess('Start');
+
+      expect(result.results[0]?.status).toBe('available');
+      expect(rdsMock).toHaveReceivedCommandTimes(StartDBInstanceCommand, 1);
+      expect(waitsOf(run.execution).map((wait) => wait.name)).toEqual([
+        'wait-db-test-db-0',
+        'wait-db-test-db-1',
+      ]);
+    });
+
+    it('waits while Stop sees storage-optimization instead of failing', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock
+        .on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'storage-optimization' }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] });
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]?.status).toBe('stopped');
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
     });
   });
 
@@ -526,7 +544,7 @@ describe('running-schedule.lambda', () => {
       mockDiscoveredResources([clusterArn]);
       rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [] });
 
-      const result = await handler(createEvent('Start'), createMockDurableContext());
+      const { result } = await runToSuccess('Start');
 
       expect(result.results[0]).toMatchObject({
         resource: clusterArn,
@@ -542,7 +560,7 @@ describe('running-schedule.lambda', () => {
       mockDiscoveredResources([clusterArn]);
       rdsMock.on(DescribeDBClustersCommand).rejects({ name: 'DBClusterNotFoundFault' });
 
-      const result = await handler(createEvent('Stop'), createMockDurableContext());
+      const { result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('skipped');
       expect(rdsMock).not.toHaveReceivedCommand(StopDBClusterCommand);
@@ -552,40 +570,104 @@ describe('running-schedule.lambda', () => {
       mockDiscoveredResources([clusterArn]);
       rdsMock.on(DescribeDBClustersCommand).rejects({ name: 'DbClusterNotFoundException' });
 
-      const result = await handler(createEvent('Stop'), createMockDurableContext());
+      const { result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('skipped');
     });
   });
 
   describe('error handling', () => {
-    it('throws when the DB instance is not found', async () => {
+    it('fails when the DB instance is not found', async () => {
       mockDiscoveredResources([dbArn]);
       rdsMock.on(DescribeDBInstancesCommand).resolves({ DBInstances: [] });
 
-      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
-        'DB instance not found: test-db',
-      );
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toContain('DB instance not found: test-db');
     });
 
-    it('throws when the DB instance reaches an unknown status', async () => {
+    it('fails when the DB instance reaches an unknown status', async () => {
       mockDiscoveredResources([dbArn]);
       rdsMock.on(DescribeDBInstancesCommand).resolves({
         DBInstances: [{ DBInstanceStatus: 'incompatible-restore' }],
       });
 
-      await expect(handler(createEvent('Start'), createMockDurableContext())).rejects.toThrow(
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toBe(
         'db instance or cluster status fail: type=db identifier=test-db current=incompatible-restore',
       );
     });
 
-    it('rethrows unexpected DescribeDBClusters errors', async () => {
+    it('fails when DescribeDBClusters raises an unexpected error', async () => {
       mockDiscoveredResources([clusterArn]);
       rdsMock.on(DescribeDBClustersCommand).rejects(new Error('network failure'));
 
-      await expect(handler(createEvent('Stop'), createMockDurableContext())).rejects.toThrow(
-        'network failure',
-      );
+      const { error } = await runToFailure(createEvent('Stop'));
+
+      expect(error.errorMessage).toContain('network failure');
+    });
+
+    it('processes the other resources before failing when one resource fails', async () => {
+      mockDiscoveredResources([dbArn, clusterArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'incompatible-restore' }],
+      });
+      rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'available' }] });
+
+      await runToFailure(createEvent('Start'));
+
+      expect(rdsMock).toHaveReceivedCommand(DescribeDBClustersCommand);
+    });
+  });
+
+  describe('failure logs for failure detection', () => {
+    it('logs the unexpected status marker and the execution failure marker', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'incompatible-restore' }],
+      });
+
+      await runToFailure(createEvent('Start'));
+
+      const logs = loggedMessages();
+      expect(logs).toContain(`${LOG_MARKER_RESOURCE_STATUS_UNEXPECTED}: db instance or cluster status fail`);
+      expect(logs).toContain(LOG_MARKER_SCHEDULE_EXECUTION_FAILED);
+      expect(logs).not.toContain(LOG_MARKER_RESOURCE_WAIT_TIMED_OUT);
+    });
+
+    it('logs the wait timeout marker and the execution failure marker', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 60 });
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
+
+      await runToFailure(createEvent('Start'));
+
+      const logs = loggedMessages();
+      expect(logs).toContain(`${LOG_MARKER_RESOURCE_WAIT_TIMED_OUT}: wait timed out`);
+      expect(logs).toContain(LOG_MARKER_SCHEDULE_EXECUTION_FAILED);
+      expect(logs).not.toContain(LOG_MARKER_RESOURCE_STATUS_UNEXPECTED);
+    });
+
+    it('logs only the execution failure marker for a validation failure', async () => {
+      await runToFailure({ Params: {} as ScheduleEvent['Params'] });
+
+      const logs = loggedMessages();
+      expect(logs).toContain(LOG_MARKER_SCHEDULE_EXECUTION_FAILED);
+      expect(logs).not.toContain(LOG_MARKER_RESOURCE_WAIT_TIMED_OUT);
+      expect(logs).not.toContain(LOG_MARKER_RESOURCE_STATUS_UNEXPECTED);
+    });
+
+    it('logs no failure marker when every resource succeeds', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({ DBInstances: [{ DBInstanceStatus: 'available' }] });
+
+      await runToSuccess('Start');
+
+      const logs = loggedMessages();
+      expect(logs).not.toContain(LOG_MARKER_SCHEDULE_EXECUTION_FAILED);
+      expect(logs).not.toContain(LOG_MARKER_RESOURCE_WAIT_TIMED_OUT);
+      expect(logs).not.toContain(LOG_MARKER_RESOURCE_STATUS_UNEXPECTED);
     });
   });
 
@@ -599,14 +681,13 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available' }] });
       rdsMock.on(StartDBInstanceCommand).resolves({});
 
-      const context = createMockDurableContext();
-      const result = await handler(createEvent('Start'), context);
+      const { run, result } = await runToSuccess('Start');
 
       expect(result.results[0]?.status).toBe('available');
-      expect(context.wait).toHaveBeenCalledWith({ seconds: 15 });
+      expect(waitsOf(run.execution)).toEqual([{ name: 'wait-db-test-db-0', seconds: 15 }]);
     });
 
-    it('throws when the wait budget is exhausted', async () => {
+    it('fails when the wait budget is exhausted', async () => {
       mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 120 });
       mockDiscoveredResources([dbArn]);
       rdsMock
@@ -616,32 +697,24 @@ describe('running-schedule.lambda', () => {
         .resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
       rdsMock.on(StartDBInstanceCommand).resolves({});
 
-      const context = createMockDurableContext();
-      const timeout = await handler(createEvent('Start'), context).catch((caught: unknown) => caught);
-      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
-      expect(timeout).toHaveProperty(
-        'message',
-        'wait timed out: type=db identifier=test-db maxWaitSeconds=120',
-      );
-      expect(context.wait).toHaveBeenCalledTimes(2);
-      expect(context.wait).toHaveBeenCalledWith({ seconds: 60 });
+      const { run, error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toBe('wait timed out: type=db identifier=test-db maxWaitSeconds=120');
+      expect(waitsOf(run.execution)).toEqual([
+        { name: 'wait-db-test-db-0', seconds: 60 },
+        { name: 'wait-db-test-db-1', seconds: 60 },
+      ]);
       expect(rdsMock).toHaveReceivedCommandTimes(StartDBInstanceCommand, 1);
     });
 
     it('posts a Slack timeout message when notification is enabled', async () => {
       mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 60, NOTIFY_SLACK_ON_WAIT_TIMEOUT: true });
       mockDiscoveredResources([dbArn]);
-      rdsMock
-        .on(DescribeDBInstancesCommand)
-        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'starting' }] })
-        .resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
+      rdsMock.on(DescribeDBInstancesCommand).resolves({ DBInstances: [{ DBInstanceStatus: 'starting' }] });
 
-      const timeout = await handler(createEvent('Start'), createMockDurableContext()).catch((caught: unknown) => caught);
-      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
-      expect(timeout).toHaveProperty(
-        'message',
-        'wait timed out: type=db identifier=test-db maxWaitSeconds=60',
-      );
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toBe('wait timed out: type=db identifier=test-db maxWaitSeconds=60');
       expect(mockPostMessage).toHaveBeenCalledTimes(2);
       expect(mockPostMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
         channel: 'C12345678',
@@ -665,21 +738,19 @@ describe('running-schedule.lambda', () => {
       mockDiscoveredResources([clusterArn]);
       rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'stopping' }] });
 
-      const timeout = await handler(createEvent('Stop'), createMockDurableContext()).catch((caught: unknown) => caught);
-      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
-      expect(timeout).toHaveProperty(
-        'message',
-        'wait timed out: type=cluster identifier=test-cluster maxWaitSeconds=60',
-      );
+      const { error } = await runToFailure(createEvent('Stop'));
+
+      expect(error.errorMessage).toBe('wait timed out: type=cluster identifier=test-cluster maxWaitSeconds=60');
       expect(mockPostMessage).toHaveBeenCalledTimes(1);
     });
 
-    it('throws on invalid wait settings before calling RDS', async () => {
+    it('fails on invalid wait settings before calling RDS', async () => {
       mockEnv({ WAIT_INTERVAL_SECONDS: 1.5 });
 
-      const invalid = await handler(createEvent('Start'), createMockDurableContext()).catch((caught: unknown) => caught);
-      expect(invalid).toBeInstanceOf(RdsDatabaseRunningSchedulerValidateError);
-      expect(invalid).toHaveProperty('message', 'resourceWait.intervalSeconds must be a positive integer');
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorType).toBe('RdsDatabaseRunningSchedulerValidateError');
+      expect(error.errorMessage).toBe('resourceWait.intervalSeconds must be a positive integer');
       expect(rdsMock).not.toHaveReceivedCommand(DescribeDBInstancesCommand);
     });
   });
@@ -694,18 +765,15 @@ describe('running-schedule.lambda', () => {
       });
     });
 
-    it('throws without fetching a secret or posting to Slack', async () => {
+    it('fails without fetching a secret or posting to Slack', async () => {
       mockDiscoveredResources([dbArn]);
       rdsMock.on(DescribeDBInstancesCommand).resolves({
         DBInstances: [{ DBInstanceStatus: 'starting' }],
       });
 
-      const timeout = await handler(createEvent('Start'), createMockDurableContext()).catch((caught: unknown) => caught);
-      expect(timeout).toBeInstanceOf(RdsDatabaseRunningSchedulerTimeoutError);
-      expect(timeout).toHaveProperty(
-        'message',
-        'wait timed out: type=db identifier=test-db maxWaitSeconds=60',
-      );
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toBe('wait timed out: type=db identifier=test-db maxWaitSeconds=60');
       expect(secretFetcher.getSecretValue).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
     });

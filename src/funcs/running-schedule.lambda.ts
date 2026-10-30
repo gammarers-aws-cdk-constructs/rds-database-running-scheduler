@@ -26,13 +26,22 @@ import { StrictEnvResolver, StrictEnvType } from 'strict-env-resolver';
 import {
   DEFAULT_MAX_WAIT_SECONDS,
   DEFAULT_WAIT_INTERVAL_SECONDS,
+  LOG_MARKER_RESOURCE_STATUS_UNEXPECTED,
+  LOG_MARKER_RESOURCE_WAIT_TIMED_OUT,
+  LOG_MARKER_SCHEDULE_EXECUTION_FAILED,
+  RUNNING_MODE_START,
+  type RunningMode,
 } from '../settings/consts';
 import {
   nextPaginationToken,
   parseTargetRegions,
   selectTargetRegions,
 } from './core/running-schedule-discovery';
-import { RdsDatabaseRunningSchedulerTimeoutError } from './core/running-schedule-errors';
+import {
+  RdsDatabaseRunningSchedulerStatusError,
+  RdsDatabaseRunningSchedulerTimeoutError,
+  RdsDatabaseRunningSchedulerValidateError,
+} from './core/running-schedule-errors';
 import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
@@ -40,8 +49,10 @@ import {
 } from './core/running-schedule-targets';
 import {
   nextWaitStep,
+  RESOURCE_STATUS,
   resolveResourceWait,
   shouldContinueWaitLoop,
+  type ResolvedResourceWait,
   type WaitLoopSignal,
 } from './core/running-schedule-wait';
 
@@ -49,9 +60,27 @@ import {
  * Canonical status labels and emojis used in Slack notifications.
  */
 const STATE_LIST = [
-  { name: 'AVAILABLE', emoji: '🤩', state: 'available' },
-  { name: 'STOPPED', emoji: '😴', state: 'stopped' },
+  { name: 'AVAILABLE', emoji: '🤩', state: RESOURCE_STATUS.AVAILABLE },
+  { name: 'STOPPED', emoji: '😴', state: RESOURCE_STATUS.STOPPED },
 ] as const;
+
+/**
+ * Most resources processed at the same time in one run.
+ */
+const MAX_CONCURRENT_RESOURCES = 10;
+
+/**
+ * Shared HTTP settings for every AWS SDK client in this handler.
+ *
+ * Retries stay with the SDK defaults. These limits keep one hung request from
+ * holding the invocation until the Lambda timeout.
+ */
+const AWS_CLIENT_CONFIG = {
+  requestHandler: {
+    connectionTimeout: 5_000,
+    requestTimeout: 30_000,
+  },
+} as const;
 
 /**
  * Event payload for scheduled start/stop execution.
@@ -64,7 +93,7 @@ interface ScheduleEvent {
     /** Tag values matched by the resource discovery query. */
     TagValues: string[];
     /** Requested operation: start or stop the matched resources. */
-    Mode: 'Start' | 'Stop';
+    Mode: RunningMode;
   };
 }
 
@@ -111,17 +140,17 @@ const rdsClientCache = new Map<string, RDSClient>();
  *
  * @param region AWS region extracted from the target resource ARN.
  * @returns Cached or newly created RDS client for the region.
- * @throws {Error} When `region` is empty.
+ * @throws {RdsDatabaseRunningSchedulerValidateError} When `region` is empty.
  */
 const getRdsClient = (region: string): RDSClient => {
   if (!region) {
-    throw new Error('Region is required to create RDS client');
+    throw new RdsDatabaseRunningSchedulerValidateError('Region is required to create RDS client');
   }
   const cached = rdsClientCache.get(region);
   if (cached) {
     return cached;
   }
-  const client = new RDSClient({ region });
+  const client = new RDSClient({ ...AWS_CLIENT_CONFIG, region });
   rdsClientCache.set(region, client);
   return client;
 };
@@ -168,7 +197,7 @@ const deduplicateTargetResources = async (arns: string[]): Promise<string[]> => 
  * @returns Enabled region names.
  */
 const listEnabledRegions = async (): Promise<string[]> => {
-  const client = new EC2Client({});
+  const client = new EC2Client({ ...AWS_CLIENT_CONFIG });
   const response = await client.send(new DescribeRegionsCommand({}));
   return (response.Regions ?? []).map((r) => r.RegionName ?? '').filter(Boolean);
 };
@@ -189,7 +218,7 @@ const findTaggedResourceArns = async (
   tagKey: string,
   tagValues: string[],
 ): Promise<string[]> => {
-  const client = new ResourceGroupsTaggingAPIClient({ region });
+  const client = new ResourceGroupsTaggingAPIClient({ ...AWS_CLIENT_CONFIG, region });
   const arns: string[] = [];
   let paginationToken: string | undefined;
   do {
@@ -236,6 +265,87 @@ const readErrorName = (err: unknown): string => {
   return err.name;
 };
 
+/**
+ * Reads a log-friendly message from an unknown thrown value.
+ *
+ * @param err Value caught from a handler step.
+ * @returns The error message, or the stringified value when it is not an `Error`.
+ */
+const readErrorMessage = (err: unknown): string => {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+};
+
+/**
+ * Slack settings for the wait-timeout notice of one resource.
+ */
+interface WaitTimeoutNotice {
+  /** Slack client, when Slack is configured. */
+  client: WebClient | undefined;
+  /** Slack channel, when Slack is configured. */
+  channel: string | undefined;
+  /** Parent message timestamp the notice replies to. */
+  threadTs: string | undefined;
+  /** Whether `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is on. */
+  enabled: boolean;
+  /** Maximum wait seconds reported in the notice. */
+  maxSeconds: number;
+}
+
+/**
+ * Logs a resource failure for the failure-detection alarms and, for a wait
+ * timeout, posts the Slack timeout notice when it is enabled.
+ *
+ * The caller rethrows the original error after this returns.
+ *
+ * @param context Durable context of the failed resource.
+ * @param err Error raised while processing the resource.
+ * @param targetResource Target RDS resource ARN.
+ * @param notice Slack settings for the timeout notice.
+ */
+const reportResourceFailure = async (
+  context: DurableContext,
+  err: unknown,
+  targetResource: string,
+  notice: WaitTimeoutNotice,
+): Promise<void> => {
+  if (err instanceof RdsDatabaseRunningSchedulerStatusError) {
+    context.logger.error(`${LOG_MARKER_RESOURCE_STATUS_UNEXPECTED}: ${err.message}`);
+    return;
+  }
+  if (!(err instanceof RdsDatabaseRunningSchedulerTimeoutError)) {
+    return;
+  }
+  context.logger.error(`${LOG_MARKER_RESOURCE_WAIT_TIMED_OUT}: ${err.message}`);
+  const { client, channel } = notice;
+  if (!client || !channel || !notice.enabled) {
+    return;
+  }
+  const target = parseRdsArn(targetResource);
+  await context.step('post-slack-timeout-message', async () => {
+    return client.chat.postMessage({
+      channel,
+      thread_ts: notice.threadTs,
+      attachments: [
+        {
+          color: '#e01e5a',
+          pretext: `The RDS ${target.type} ${target.identifier}`
+            + ' did not reach the target state within the wait limit.',
+          fields: [
+            { title: 'Account', value: target.account, short: true },
+            { title: 'Region', value: target.region, short: true },
+            { title: 'Type', value: target.type, short: true },
+            { title: 'Identifier', value: target.identifier, short: true },
+            { title: 'Status', value: 'TIMED_OUT', short: true },
+            { title: 'Max wait (seconds)', value: String(notice.maxSeconds), short: true },
+          ],
+        },
+      ],
+    });
+  });
+};
 
 /**
  * Processes one RDS resource until it reaches a stable state or the wait budget is spent.
@@ -254,14 +364,15 @@ const readErrorName = (err: unknown): string => {
  * @param mode Requested operation mode.
  * @param waitSettings Validated interval and maximum wait for this resource.
  * @returns Final processing result including status and resource metadata.
- * Status is `timed-out` when the wait budget is exhausted.
- * @throws {Error} When the resource reaches an unexpected status or a DB instance is not found.
+ * @throws {RdsDatabaseRunningSchedulerStatusError} When the resource reaches an unexpected status.
+ * @throws {RdsDatabaseRunningSchedulerTimeoutError} When the wait budget is exhausted.
+ * @throws {Error} When a DB instance is not found.
  */
 const processing = async (
   context: DurableContext,
   targetResource: string,
-  mode: 'Start' | 'Stop',
-  waitSettings: { intervalSeconds: number; maxSeconds: number },
+  mode: RunningMode,
+  waitSettings: ResolvedResourceWait,
 ): Promise<ProcessingResult> => {
   const target = await context.step('get-identifier', async () => parseRdsArn(targetResource));
 
@@ -271,7 +382,6 @@ const processing = async (
   let elapsedWaitSeconds = 0;
   let signal: WaitLoopSignal = 'open';
   let outcome: ProcessingResult | undefined;
-  let failureMessage: string | undefined;
 
   const toResult = (status: string): ProcessingResult => ({
     resource: targetResource,
@@ -299,70 +409,60 @@ const processing = async (
         const res = await rds.send(new DescribeDBClustersCommand({ DBClusterIdentifier: target.identifier }));
         const current = res.DBClusters?.[0]?.Status;
         if (current == null) {
-          return { current: 'not-found', type: target.type, identifier: target.identifier };
+          return { current: RESOURCE_STATUS.NOT_FOUND, type: target.type, identifier: target.identifier };
         }
         return { current, type: target.type, identifier: target.identifier };
       } catch (err: unknown) {
         const code = readErrorName(err);
         if (code === 'DBClusterNotFoundFault' || code === 'DbClusterNotFoundException') {
-          return { current: 'not-found', type: target.type, identifier: target.identifier };
+          return { current: RESOURCE_STATUS.NOT_FOUND, type: target.type, identifier: target.identifier };
         }
         throw err;
       }
     });
 
-    const step = nextWaitStep(
+    const step = nextWaitStep({
       mode,
-      statusResult.current,
+      current: statusResult.current,
       elapsedWaitSeconds,
       intervalSeconds,
-      maxSeconds,
-    );
+      maxWaitSeconds: maxSeconds,
+      resourceLabel: `type=${target.type} identifier=${target.identifier}`,
+    });
 
     if (step.kind === 'finish') {
       signal = 'settled';
       outcome = toResult(step.status);
     }
-    if (step.kind === 'timed-out') {
-      signal = 'settled';
-      outcome = toResult('timed-out');
-    }
-    if (step.kind === 'fail') {
-      signal = 'failed';
-      failureMessage = `db instance or cluster status fail: type=${target.type}`
-        + ` identifier=${target.identifier} current=${step.current}`;
-    }
+    // Step and wait names carry the iteration so each attempt stays unique across replays.
     if (step.kind === 'pause' && step.command === 'start' && target.type === 'db') {
-      await context.step(`start-db-${target.identifier}`, async () => {
+      await context.step(`start-db-${target.identifier}-${iteration}`, async () => {
         await rds.send(new StartDBInstanceCommand({ DBInstanceIdentifier: target.identifier }));
       });
     }
     if (step.kind === 'pause' && step.command === 'start' && target.type === 'cluster') {
-      await context.step(`start-cluster-${target.identifier}`, async () => {
+      await context.step(`start-cluster-${target.identifier}-${iteration}`, async () => {
         await rds.send(new StartDBClusterCommand({ DBClusterIdentifier: target.identifier }));
       });
     }
     if (step.kind === 'pause' && step.command === 'stop' && target.type === 'db') {
-      await context.step(`stop-db-${target.identifier}`, async () => {
+      await context.step(`stop-db-${target.identifier}-${iteration}`, async () => {
         await rds.send(new StopDBInstanceCommand({ DBInstanceIdentifier: target.identifier }));
       });
     }
     if (step.kind === 'pause' && step.command === 'stop' && target.type === 'cluster') {
-      await context.step(`stop-cluster-${target.identifier}`, async () => {
+      await context.step(`stop-cluster-${target.identifier}-${iteration}`, async () => {
         await rds.send(new StopDBClusterCommand({ DBClusterIdentifier: target.identifier }));
       });
     }
     if (step.kind === 'pause') {
-      await context.wait({ seconds: intervalSeconds });
+      await context.wait(`wait-${target.type}-${target.identifier}-${iteration}`, { seconds: intervalSeconds });
       elapsedWaitSeconds += intervalSeconds;
     }
 
     iteration += 1;
   } while (shouldContinueWaitLoop(signal));
 
-  if (failureMessage !== undefined) {
-    throw new Error(failureMessage);
-  }
   if (outcome === undefined) {
     throw new Error(`wait loop ended without a result: type=${target.type} identifier=${target.identifier}`);
   }
@@ -398,152 +498,158 @@ const processing = async (
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
  * @returns Processed resource count and per-resource results after deduplication.
- * @throws {Error} When required event parameters
- * (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing.
- * @throws {RdsDatabaseRunningSchedulerValidateError} When wait settings are not
- * positive integers within the allowed maximum, when `TARGET_REGIONS` is not a
- * JSON array of distinct region names, or when it names a region that is not
- * enabled for the account.
+ * @throws {RdsDatabaseRunningSchedulerValidateError} When required event parameters
+ * (`Params.TagKey`, `Params.TagValues`, `Params.Mode`) are missing, when wait
+ * settings are not positive integers within the allowed maximum, when
+ * `TARGET_REGIONS` is not a JSON array of distinct region names, or when it names
+ * a region that is not enabled for the account.
  * @throws {RdsDatabaseRunningSchedulerTimeoutError} When a resource exceeds its wait budget.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
+const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
+  const params = event.Params;
+  if (!params?.TagKey || !params?.TagValues || !params?.Mode) {
+    throw new RdsDatabaseRunningSchedulerValidateError(
+      'Invalid event: Params.TagKey, Params.TagValues, Params.Mode are required.',
+    );
+  }
+
+  const resourceWait = resolveResourceWait(
+    StrictEnvResolver.resolve('WAIT_INTERVAL_SECONDS', StrictEnvType.Number, { default: DEFAULT_WAIT_INTERVAL_SECONDS }),
+    StrictEnvResolver.resolve('MAX_WAIT_SECONDS', StrictEnvType.Number, { default: DEFAULT_MAX_WAIT_SECONDS }),
+  );
+  const notifySlackOnWaitTimeout = StrictEnvResolver.resolve(
+    'NOTIFY_SLACK_ON_WAIT_TIMEOUT',
+    StrictEnvType.Boolean,
+    { default: false },
+  );
+  const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
+  const requestedRegions = parseTargetRegions(
+    StrictEnvResolver.resolve('TARGET_REGIONS', StrictEnvType.String, { default: '[]' }),
+  );
+
+  let slackClient: WebClient | undefined;
+  let slackChannel: string | undefined;
+  if (slackSecretName) {
+    const slackSecretValue = await context.step('fetch-slack-secret', async () => {
+      return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
+    });
+    slackClient = new WebClient(slackSecretValue.token);
+    slackChannel = slackSecretValue.channel;
+  }
+
+  // Search every enabled region, or only the regions named by `targetRegions`.
+  const searchRegions = await context.step('get-target-regions', async () => {
+    return selectTargetRegions(await listEnabledRegions(), requestedRegions);
+  });
+
+  const discoveredResources: string[] = [];
+  for (const region of searchRegions) {
+    const arns = await context.step(`get-resources-${region}`, async () => {
+      return findTaggedResourceArns(region, params.TagKey, params.TagValues);
+    });
+    discoveredResources.push(...arns);
+  }
+
+  const targetResources = await context.step('deduplicate-target-resources', async () => {
+    return deduplicateTargetResources(discoveredResources);
+  });
+
+  if (targetResources.length === 0) {
+    return { processed: 0, results: [] };
+  }
+
+  let slackParentMessageTs: string | undefined;
+  if (slackClient && slackChannel) {
+    const client = slackClient;
+    const channel = slackChannel;
+    const slackParentMessageResult = await context.step('post-slack-messages', async () => {
+      return client.chat.postMessage({
+        channel,
+        text: `${params.Mode === RUNNING_MODE_START ? '😆 Starts' : '🥱 Stops'} the scheduled RDS Database or Cluster.`,
+      });
+    });
+    slackParentMessageTs = slackParentMessageResult?.ts;
+  }
+
+  const results = await context.map(
+    targetResources,
+    async (ctx: DurableContext, targetResource: string, index: number) => {
+      return ctx.runInChildContext(`resource-${index}`, async (childCtx: DurableContext) => {
+        let result: ProcessingResult;
+        try {
+          result = await processing(childCtx, targetResource, params.Mode, resourceWait);
+        } catch (err: unknown) {
+          await reportResourceFailure(childCtx, err, targetResource, {
+            client: slackClient,
+            channel: slackChannel,
+            threadTs: slackParentMessageTs,
+            enabled: notifySlackOnWaitTimeout,
+            maxSeconds: resourceWait.maxSeconds,
+          });
+          throw err;
+        }
+        if (result.status === 'skipped') {
+          return result;
+        }
+        if (!slackClient || !slackChannel) {
+          return result;
+        }
+        const client = slackClient;
+        const channel = slackChannel;
+        await childCtx.step('post-slack-child-messages', async () => {
+          const display = getStateDisplay(result.status);
+
+          return client.chat.postMessage({
+            channel,
+            thread_ts: slackParentMessageTs,
+            attachments: [
+              {
+                color: '#36a64f',
+                pretext: `${display?.emoji} The status of the RDS ${result.type}`
+                  + ` changed to ${display?.name} due to the schedule.`,
+                fields: [
+                  { title: 'Account', value: result.account, short: true },
+                  { title: 'Region', value: result.region, short: true },
+                  { title: 'Type', value: result.type, short: true },
+                  { title: 'Identifier', value: result.identifier, short: true },
+                  { title: 'Status', value: (display?.name ?? 'Unknown'), short: true },
+                ],
+              },
+            ],
+          });
+        });
+        return result;
+      });
+    },
+    { maxConcurrency: MAX_CONCURRENT_RESOURCES },
+  );
+
+  // `context.map` records each failed resource instead of throwing, so rethrow
+  // the first failure to fail the execution after every resource was attempted.
+  results.throwIfError();
+
+  return { processed: results.totalCount, results: results.getResults() };
+};
+
+/**
+ * Durable Lambda handler for the scheduled start/stop run.
+ *
+ * Writes one ERROR log that starts with `LOG_MARKER_SCHEDULE_EXECUTION_FAILED` when
+ * the execution fails for any reason, then rethrows the original error.
+ *
+ * @param event Scheduler event payload containing tag filters and operation mode.
+ * @param context Durable execution context from the durable execution SDK.
+ * @returns Processed resource count and per-resource results after deduplication.
+ * @throws Any error raised by {@link runSchedule}.
+ */
 export const handler = withDurableExecution(
   async (event: ScheduleEvent, context: DurableContext) => {
-    const params = event.Params;
-    if (!params?.TagKey || !params?.TagValues || !params?.Mode) {
-      throw new Error('Invalid event: Params.TagKey, Params.TagValues, Params.Mode are required.');
+    try {
+      return await runSchedule(event, context);
+    } catch (err: unknown) {
+      context.logger.error(`${LOG_MARKER_SCHEDULE_EXECUTION_FAILED}: ${readErrorMessage(err)}`);
+      throw err;
     }
-
-    const resourceWait = resolveResourceWait(
-      StrictEnvResolver.resolve('WAIT_INTERVAL_SECONDS', StrictEnvType.Number, { default: DEFAULT_WAIT_INTERVAL_SECONDS }),
-      StrictEnvResolver.resolve('MAX_WAIT_SECONDS', StrictEnvType.Number, { default: DEFAULT_MAX_WAIT_SECONDS }),
-    );
-    const notifySlackOnWaitTimeout = StrictEnvResolver.resolve(
-      'NOTIFY_SLACK_ON_WAIT_TIMEOUT',
-      StrictEnvType.Boolean,
-      { default: false },
-    );
-    const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
-    const requestedRegions = parseTargetRegions(
-      StrictEnvResolver.resolve('TARGET_REGIONS', StrictEnvType.String, { default: '[]' }),
-    );
-
-    let slackClient: WebClient | undefined;
-    let slackChannel: string | undefined;
-    if (slackSecretName) {
-      const slackSecretValue = await context.step('fetch-slack-secret', async () => {
-        return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
-      });
-      slackClient = new WebClient(slackSecretValue.token);
-      slackChannel = slackSecretValue.channel;
-    }
-
-    // Search every enabled region, or only the regions named by `targetRegions`.
-    const searchRegions = await context.step('get-target-regions', async () => {
-      return selectTargetRegions(await listEnabledRegions(), requestedRegions);
-    });
-
-    const discoveredResources: string[] = [];
-    for (const region of searchRegions) {
-      const arns = await context.step(`get-resources-${region}`, async () => {
-        return findTaggedResourceArns(region, params.TagKey, params.TagValues);
-      });
-      discoveredResources.push(...arns);
-    }
-
-    const targetResources = await context.step('deduplicate-target-resources', async () => {
-      return deduplicateTargetResources(discoveredResources);
-    });
-
-    if (targetResources.length === 0) {
-      return { processed: 0, results: [] };
-    }
-
-    let slackParentMessageTs: string | undefined;
-    if (slackClient && slackChannel) {
-      const client = slackClient;
-      const channel = slackChannel;
-      const slackParentMessageResult = await context.step('post-slack-messages', async () => {
-        return client.chat.postMessage({
-          channel,
-          text: `${params.Mode === 'Start' ? '😆 Starts' : '🥱 Stops'} the scheduled RDS Database or Cluster.`,
-        });
-      });
-      slackParentMessageTs = slackParentMessageResult?.ts;
-    }
-
-    const results = await context.map(
-      targetResources,
-      async (ctx: DurableContext, targetResource: string, index: number) => {
-        return ctx.runInChildContext(`resource-${index}`, async (childCtx: DurableContext) => {
-          const result = await processing(childCtx, targetResource, params.Mode, resourceWait);
-          if (result.status === 'skipped') {
-            return result;
-          }
-          if (result.status === 'timed-out') {
-            if (slackClient && slackChannel && notifySlackOnWaitTimeout) {
-              const client = slackClient;
-              const channel = slackChannel;
-              await childCtx.step('post-slack-timeout-message', async () => {
-                return client.chat.postMessage({
-                  channel,
-                  thread_ts: slackParentMessageTs,
-                  attachments: [
-                    {
-                      color: '#e01e5a',
-                      pretext: `The RDS ${result.type} ${result.identifier}`
-                        + ' did not reach the target state within the wait limit.',
-                      fields: [
-                        { title: 'Account', value: result.account, short: true },
-                        { title: 'Region', value: result.region, short: true },
-                        { title: 'Type', value: result.type, short: true },
-                        { title: 'Identifier', value: result.identifier, short: true },
-                        { title: 'Status', value: 'TIMED_OUT', short: true },
-                        { title: 'Max wait (seconds)', value: String(resourceWait.maxSeconds), short: true },
-                      ],
-                    },
-                  ],
-                });
-              });
-            }
-            throw new RdsDatabaseRunningSchedulerTimeoutError(
-              `wait timed out: type=${result.type} identifier=${result.identifier}`
-              + ` maxWaitSeconds=${resourceWait.maxSeconds}`,
-            );
-          }
-          if (!slackClient || !slackChannel) {
-            return result;
-          }
-          const client = slackClient;
-          const channel = slackChannel;
-          await childCtx.step('post-slack-child-messages', async () => {
-            const display = getStateDisplay(result.status);
-
-            return client.chat.postMessage({
-              channel,
-              thread_ts: slackParentMessageTs,
-              attachments: [
-                {
-                  color: '#36a64f',
-                  pretext: `${display?.emoji} The status of the RDS ${result.type}`
-                    + ` changed to ${display?.name} due to the schedule.`,
-                  fields: [
-                    { title: 'Account', value: result.account, short: true },
-                    { title: 'Region', value: result.region, short: true },
-                    { title: 'Type', value: result.type, short: true },
-                    { title: 'Identifier', value: result.identifier, short: true },
-                    { title: 'Status', value: (display?.name ?? 'Unknown'), short: true },
-                  ],
-                },
-              ],
-            });
-          });
-          return result;
-        });
-      },
-      { maxConcurrency: 10 },
-    );
-
-    return { processed: results.totalCount, results: results.getResults() };
   },
 );

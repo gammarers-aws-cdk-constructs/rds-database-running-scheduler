@@ -40,6 +40,7 @@ export class RDSDatabaseRunningScheduleStack extends Stack {
       resourceWait: props.resourceWait,
       stopSchedule: props.stopSchedule,
       startSchedule: props.startSchedule,
+      failureDetection: props.failureDetection,
     });
   }
 }
