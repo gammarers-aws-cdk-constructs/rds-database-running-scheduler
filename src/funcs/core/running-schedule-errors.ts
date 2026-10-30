@@ -30,6 +30,18 @@ export class RdsDatabaseRunningSchedulerValidateError extends RdsDatabaseRunning
 }
 
 /**
+ * A resource reported a status that neither finishes nor continues the requested operation.
+ */
+export class RdsDatabaseRunningSchedulerStatusError extends RdsDatabaseRunningSchedulerError {
+  override readonly name: string = 'RdsDatabaseRunningSchedulerStatusError';
+
+  constructor(message: string) {
+    super(message);
+    Object.setPrototypeOf(this, RdsDatabaseRunningSchedulerStatusError.prototype);
+  }
+}
+
+/**
  * A resource did not reach its target state within the wait budget.
  */
 export class RdsDatabaseRunningSchedulerTimeoutError extends RdsDatabaseRunningSchedulerError {

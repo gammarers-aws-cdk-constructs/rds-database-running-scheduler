@@ -15,7 +15,7 @@ export interface RDSDatabaseRunningScheduleStackProps extends RDSDatabaseRunning
 
 /**
  * CDK stack that provisions scheduled start/stop control for tagged RDS resources
- * in the deployment account.
+ * in the enabled regions of the deployment account, or only in `targetRegions`.
  *
  * Delegates resource discovery, cluster-priority deduplication, start/stop
  * execution, per-resource wait limits, and optional Slack notifications to
@@ -34,11 +34,13 @@ export class RDSDatabaseRunningScheduleStack extends Stack {
 
     new RDSDatabaseRunningScheduler(this, 'RDSDatabaseRunningScheduler', {
       targetResource: props.targetResource,
+      targetRegions: props.targetRegions,
       enableScheduling: props.enableScheduling,
       notification: props.notification,
       resourceWait: props.resourceWait,
       stopSchedule: props.stopSchedule,
       startSchedule: props.startSchedule,
+      failureDetection: props.failureDetection,
     });
   }
 }

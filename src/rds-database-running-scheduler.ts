@@ -6,11 +6,22 @@ import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as targets from 'aws-cdk-lib/aws-scheduler-targets';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+import {
+  createLambdaFailureDetector,
+  type LambdaFailureDetection,
+  type LambdaFailureDetector,
+  type LogFailureFilter,
+} from 'lambda-failure-detector';
 import { RunningScheduleFunction } from './funcs/running-schedule-function';
 import {
   DEFAULT_MAX_WAIT_SECONDS,
   DEFAULT_WAIT_INTERVAL_SECONDS,
+  LOG_MARKER_RESOURCE_STATUS_UNEXPECTED,
+  LOG_MARKER_RESOURCE_WAIT_TIMED_OUT,
+  LOG_MARKER_SCHEDULE_EXECUTION_FAILED,
   MAX_WAIT_SECONDS_LIMIT,
+  RUNNING_MODE_START,
+  RUNNING_MODE_STOP,
 } from './settings/consts';
 
 /**
@@ -131,6 +142,13 @@ export interface RDSDatabaseRunningSchedulerProps {
   /** Tag filter to select RDS instances and clusters. */
   readonly targetResource: TargetResource;
   /**
+   * Regions searched for tagged RDS instances and clusters.
+   * Each name must be a region enabled for the account. When specified, the array
+   * must not be empty and must not contain blank or duplicate names.
+   * @default - every region enabled for the account
+   */
+  readonly targetRegions?: string[];
+  /**
    * Enables or disables both start and stop schedules.
    * @default SchedulingEnable.ENABLED
    */
@@ -150,6 +168,19 @@ export interface RDSDatabaseRunningSchedulerProps {
   readonly stopSchedule?: Schedule;
   /** Optional override for start schedule cron configuration. */
   readonly startSchedule?: Schedule;
+  /**
+   * Opt-in CloudWatch failure detection for the scheduler Lambda.
+   *
+   * Alarms are created only when `failureDetection.enabled` is `true`. They cover the
+   * Lambda `Errors` and `Throttles` metrics and three log-based signals from the handler:
+   * a resource wait timeout, an unexpected resource status, and any failed execution.
+   * A durable execution that fails inside the handler does not always raise the Lambda
+   * `Errors` metric, so the log-based alarms are the reliable signal for those failures.
+   * Set `alarmTopic` to attach an existing SNS topic to every alarm. The construct never
+   * creates an SNS topic, and without `alarmTopic` the alarms have no notification actions.
+   * @default - no failure detection resources are created
+   */
+  readonly failureDetection?: LambdaFailureDetection;
 }
 
 /**
@@ -234,6 +265,32 @@ const resolveResourceWait = (
 };
 
 /**
+ * Validates the regions to search during synthesis.
+ *
+ * Throws a plain `Error` because this runs on the jsii surface. The handler
+ * checks the same limits and throws its own error type.
+ *
+ * @param targetRegions Regions from construct props, or `undefined` for every enabled region.
+ * @returns The same regions, or an empty array when every enabled region is searched.
+ * @throws {Error} When the array is empty, or contains a blank or duplicate region name.
+ */
+const resolveTargetRegions = (targetRegions: string[] | undefined): string[] => {
+  if (targetRegions === undefined) {
+    return [];
+  }
+  if (targetRegions.length === 0) {
+    throw new Error('targetRegions must not be empty when specified');
+  }
+  if (targetRegions.some((region) => region.trim().length === 0)) {
+    throw new Error('targetRegions must not contain blank region names');
+  }
+  if (new Set(targetRegions).size !== targetRegions.length) {
+    throw new Error('targetRegions must not contain duplicate region names');
+  }
+  return targetRegions;
+};
+
+/**
  * Account-wide RDS DB instance and cluster ARNs used to scope start/stop IAM.
  * Region is `*` because tagged resources may live outside the stack region.
  *
@@ -259,19 +316,82 @@ const rdsResourceTagCondition = (
 });
 
 /**
+ * Longest time one durable run may take, including every status wait.
+ * {@link MAX_WAIT_SECONDS_LIMIT} stays under this value so the per-resource limit fires first.
+ */
+const DURABLE_EXECUTION_TIMEOUT = Duration.hours(2);
+
+/**
+ * Failed schedule invocations stay inside one cron firing.
+ *
+ * Two retry attempts, and an event age equal to the durable execution timeout.
+ * On the default schedule the shorter gap is 11 hours 15 minutes (07:50 start
+ * to 19:05 stop), so a retry that begins at the end of this window still
+ * finishes before the opposite cron. A failed stop does not run again after
+ * the next morning's start. These values are not configurable via props.
+ */
+const SCHEDULE_RETRY_ATTEMPTS = 2;
+const SCHEDULE_MAX_EVENT_AGE = DURABLE_EXECUTION_TIMEOUT;
+
+/** Week days of the default start and stop schedules. */
+const DEFAULT_SCHEDULE_WEEK_DAY = 'MON-FRI';
+
+/** CloudWatch namespace of the log-based failure metrics. */
+const FAILURE_METRIC_NAMESPACE = 'RDSDatabaseRunningScheduler';
+
+/**
+ * Log-based failure signals of the handler. Each entry creates one metric filter and one alarm.
+ *
+ * The patterns are the markers the handler writes at the start of its ERROR logs.
+ * `ScheduleExecutionFailed` is logged for every failed execution, so it also fires
+ * together with the two cause-specific alarms.
+ */
+const RUNNING_SCHEDULER_LOG_FILTERS: LogFailureFilter[] = [
+  {
+    id: LOG_MARKER_RESOURCE_WAIT_TIMED_OUT,
+    filterPattern: `"${LOG_MARKER_RESOURCE_WAIT_TIMED_OUT}"`,
+    metricNamespace: FAILURE_METRIC_NAMESPACE,
+    metricName: LOG_MARKER_RESOURCE_WAIT_TIMED_OUT,
+  },
+  {
+    id: LOG_MARKER_RESOURCE_STATUS_UNEXPECTED,
+    filterPattern: `"${LOG_MARKER_RESOURCE_STATUS_UNEXPECTED}"`,
+    metricNamespace: FAILURE_METRIC_NAMESPACE,
+    metricName: LOG_MARKER_RESOURCE_STATUS_UNEXPECTED,
+  },
+  {
+    id: LOG_MARKER_SCHEDULE_EXECUTION_FAILED,
+    filterPattern: `"${LOG_MARKER_SCHEDULE_EXECUTION_FAILED}"`,
+    metricNamespace: FAILURE_METRIC_NAMESPACE,
+    metricName: LOG_MARKER_SCHEDULE_EXECUTION_FAILED,
+  },
+];
+
+/**
  * CDK construct that provisions a durable Lambda workflow and EventBridge
  * schedules to start/stop tagged RDS databases and clusters.
  *
- * The Lambda discovers matching resources account-wide via the Resource Groups
- * Tagging API, deduplicates Aurora cluster member instances when the parent
- * cluster is also tagged, and controls each remaining resource using the
- * region encoded in its ARN. Each resource is checked on a configurable interval
- * until it reaches a stable state or the per-resource wait limit. When Slack is
- * enabled, the Lambda posts progress and results to Slack, and can post a timeout
- * message when the wait limit is exceeded. Otherwise Secrets Manager lookup, Slack
- * API calls, and related IAM grants are skipped.
+ * The Lambda lists the regions enabled for the account, searches each one with
+ * the Resource Groups Tagging API (or only the regions in `targetRegions`),
+ * deduplicates Aurora cluster member instances when the parent cluster is also
+ * tagged, and controls each remaining resource using the region encoded in its
+ * ARN. Each resource is checked on a configurable interval
+ * until it reaches a stable state or the per-resource wait limit. A failed
+ * schedule invocation is retried at most twice, and only while the original
+ * event is less than 2 hours old, so a stop failure is not replayed after the
+ * next start. When Slack is enabled, the Lambda posts progress and results to
+ * Slack, and can post a timeout message when the wait limit is exceeded.
+ * Otherwise Secrets Manager lookup, Slack API calls, and related IAM grants
+ * are skipped. When `failureDetection.enabled` is `true`, CloudWatch alarms
+ * watch the Lambda and the handler's failure logs.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
+  /**
+   * Failure detection alarms of the scheduler Lambda.
+   * Undefined unless `failureDetection.enabled` is `true`.
+   */
+  public readonly failureDetector?: LambdaFailureDetector;
+
   /**
    * Creates a scheduler for tagged RDS resources.
    *
@@ -287,10 +407,17 @@ export class RDSDatabaseRunningScheduler extends Construct {
       props.resourceWait?.intervalSeconds ?? DEFAULT_WAIT_INTERVAL_SECONDS,
       props.resourceWait?.maxSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
     );
+    const targetRegions = resolveTargetRegions(props.targetRegions);
     let notifySlackOnWaitTimeout = WaitTimeoutNotification.DISABLED;
     if (slackNotification.state === SlackNotificationEnable.ENABLED) {
       notifySlackOnWaitTimeout = slackNotification.notifyOnWaitTimeout;
     }
+
+    const logGroup = new logs.LogGroup(this, 'RunningScheduleFunctionLogGroup', {
+      retention: logs.RetentionDays.THREE_MONTHS,
+      // Keep the logs after creation succeeds so failures stay investigable after a stack deletion or replacement.
+      removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
+    });
 
     // 👇 Lambda Function
     const runningScheduleFunction = new RunningScheduleFunction(this, 'RunningScheduleFunction', {
@@ -300,12 +427,13 @@ export class RDSDatabaseRunningScheduler extends Construct {
       memorySize: 512,
       retryAttempts: 2,
       durableConfig: {
-        executionTimeout: Duration.hours(2),
+        executionTimeout: DURABLE_EXECUTION_TIMEOUT,
         retentionPeriod: Duration.days(1),
       },
       environment: {
         WAIT_INTERVAL_SECONDS: String(resourceWait.intervalSeconds),
         MAX_WAIT_SECONDS: String(resourceWait.maxSeconds),
+        TARGET_REGIONS: JSON.stringify(targetRegions),
         NOTIFY_SLACK_ON_WAIT_TIMEOUT: notifySlackOnWaitTimeout === WaitTimeoutNotification.ENABLED ? 'true' : 'false',
         ...(slackNotification.state === SlackNotificationEnable.ENABLED
           ? { SLACK_SECRET_NAME: slackNotification.secretName }
@@ -327,10 +455,7 @@ export class RDSDatabaseRunningScheduler extends Construct {
           iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicDurableExecutionRolePolicy'),
         ],
       }),
-      logGroup: new logs.LogGroup(this, 'RunningScheduleFunctionLogGroup', {
-        retention: logs.RetentionDays.THREE_MONTHS,
-        removalPolicy: RemovalPolicy.DESTROY,
-      }),
+      logGroup,
       loggingFormat: lambda.LoggingFormat.JSON,
       systemLogLevelV2: lambda.SystemLogLevel.INFO,
       applicationLogLevelV2: lambda.ApplicationLogLevel.INFO,
@@ -340,6 +465,15 @@ export class RDSDatabaseRunningScheduler extends Construct {
       effect: iam.Effect.ALLOW,
       actions: [
         'tag:GetResources',
+      ],
+      resources: ['*'],
+    }));
+    // DescribeRegions does not support resource-level IAM. It lists the regions to search.
+    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'DescribeRegions',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'ec2:DescribeRegions',
       ],
       resources: ['*'],
     }));
@@ -373,6 +507,14 @@ export class RDSDatabaseRunningScheduler extends Construct {
     // https://docs.aws.amazon.com/lambda/latest/dg/durable-getting-started-iac.html
     const runningScheduleFunctionAlias = runningScheduleFunction.addAlias('live');
 
+    // Created only when `failureDetection.enabled` is true. Reuses this construct's log group for the log filters.
+    this.failureDetector = createLambdaFailureDetector(this, 'FailureDetector', {
+      failureDetection: props.failureDetection,
+      lambdaFunction: runningScheduleFunction,
+      logGroup,
+      logFilters: RUNNING_SCHEDULER_LOG_FILTERS,
+    });
+
     // Undefined keeps the schedules enabled. Only an explicit disabled value turns them off.
     const scheduleEnabled = props.enableScheduling !== SchedulingEnable.DISABLED;
 
@@ -384,15 +526,17 @@ export class RDSDatabaseRunningScheduler extends Construct {
       schedule: scheduler.ScheduleExpression.cron({
         minute: props.startSchedule?.minute ?? '50',
         hour: props.startSchedule?.hour ?? '7',
-        weekDay: props.startSchedule?.week ?? 'MON-FRI',
+        weekDay: props.startSchedule?.week ?? DEFAULT_SCHEDULE_WEEK_DAY,
         timeZone: props.startSchedule?.timezone ?? TimeZone.ETC_UTC,
       }),
       target: new targets.LambdaInvoke(runningScheduleFunctionAlias, {
+        retryAttempts: SCHEDULE_RETRY_ATTEMPTS,
+        maxEventAge: SCHEDULE_MAX_EVENT_AGE,
         input: scheduler.ScheduleTargetInput.fromObject({
           Params: {
             TagKey: props.targetResource.tagKey,
             TagValues: props.targetResource.tagValues,
-            Mode: 'Start',
+            Mode: RUNNING_MODE_START,
           },
         }),
       }),
@@ -404,20 +548,21 @@ export class RDSDatabaseRunningScheduler extends Construct {
       schedule: scheduler.ScheduleExpression.cron({
         minute: props.stopSchedule?.minute ?? '5',
         hour: props.stopSchedule?.hour ?? '19',
-        weekDay: props.stopSchedule?.week ?? 'MON-FRI',
+        weekDay: props.stopSchedule?.week ?? DEFAULT_SCHEDULE_WEEK_DAY,
         timeZone: props.stopSchedule?.timezone ?? TimeZone.ETC_UTC,
       }),
       target: new targets.LambdaInvoke(runningScheduleFunctionAlias, {
+        retryAttempts: SCHEDULE_RETRY_ATTEMPTS,
+        maxEventAge: SCHEDULE_MAX_EVENT_AGE,
         input: scheduler.ScheduleTargetInput.fromObject({
           Params: {
             TagKey: props.targetResource.tagKey,
             TagValues: props.targetResource.tagValues,
-            Mode: 'Stop',
+            Mode: RUNNING_MODE_STOP,
           },
         }),
       }),
     });
-
   }
 }
 

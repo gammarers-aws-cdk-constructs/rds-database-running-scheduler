@@ -90,7 +90,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1a00bcbefff4230e3b89116bf135de5b29bc260158220c2d1b30ad319eed5d9f.zip",
+          "S3Key": "20218dee83f1c5feb2e986a6a6367bdd7faa2b353a791a672d7db0b4936c9771.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -112,6 +112,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
             "SLACK_SECRET_NAME": "example/slack/webhook",
             "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
             "SSM_PARAMETER_STORE_TTL": "300",
+            "TARGET_REGIONS": "[]",
             "WAIT_INTERVAL_SECONDS": "60",
           },
         },
@@ -154,7 +155,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fe03342013f9ffe0557513e516074573",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d",
             "Version",
           ],
         },
@@ -162,7 +163,7 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fe03342013f9ffe0557513e516074573": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -184,12 +185,12 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
       "Type": "AWS::Lambda::EventInvokeConfig",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Properties": {
         "RetentionInDays": 90,
       },
       "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE": {
       "Properties": {
@@ -244,6 +245,12 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
               "Effect": "Allow",
               "Resource": "*",
               "Sid": "GetResources",
+            },
+            {
+              "Action": "ec2:DescribeRegions",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DescribeRegions",
             },
             {
               "Action": [
@@ -359,8 +366,8 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -387,8 +394,8 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -588,7 +595,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1a00bcbefff4230e3b89116bf135de5b29bc260158220c2d1b30ad319eed5d9f.zip",
+          "S3Key": "20218dee83f1c5feb2e986a6a6367bdd7faa2b353a791a672d7db0b4936c9771.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -610,6 +617,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
             "SLACK_SECRET_NAME": "example/slack/webhook",
             "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
             "SSM_PARAMETER_STORE_TTL": "300",
+            "TARGET_REGIONS": "[]",
             "WAIT_INTERVAL_SECONDS": "60",
           },
         },
@@ -652,7 +660,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fe03342013f9ffe0557513e516074573",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d",
             "Version",
           ],
         },
@@ -660,7 +668,7 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fe03342013f9ffe0557513e516074573": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -682,12 +690,12 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
       "Type": "AWS::Lambda::EventInvokeConfig",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Properties": {
         "RetentionInDays": 90,
       },
       "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE": {
       "Properties": {
@@ -742,6 +750,12 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
               "Effect": "Allow",
               "Resource": "*",
               "Sid": "GetResources",
+            },
+            {
+              "Action": "ec2:DescribeRegions",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DescribeRegions",
             },
             {
               "Action": [
@@ -857,8 +871,8 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -885,8 +899,8 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1086,7 +1100,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1a00bcbefff4230e3b89116bf135de5b29bc260158220c2d1b30ad319eed5d9f.zip",
+          "S3Key": "20218dee83f1c5feb2e986a6a6367bdd7faa2b353a791a672d7db0b4936c9771.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1108,6 +1122,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
             "SLACK_SECRET_NAME": "example/slack/webhook",
             "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
             "SSM_PARAMETER_STORE_TTL": "300",
+            "TARGET_REGIONS": "[]",
             "WAIT_INTERVAL_SECONDS": "60",
           },
         },
@@ -1150,7 +1165,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fe03342013f9ffe0557513e516074573",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d",
             "Version",
           ],
         },
@@ -1158,7 +1173,7 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fe03342013f9ffe0557513e516074573": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1180,12 +1195,12 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
       "Type": "AWS::Lambda::EventInvokeConfig",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Properties": {
         "RetentionInDays": 90,
       },
       "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE": {
       "Properties": {
@@ -1240,6 +1255,12 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
               "Effect": "Allow",
               "Resource": "*",
               "Sid": "GetResources",
+            },
+            {
+              "Action": "ec2:DescribeRegions",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DescribeRegions",
             },
             {
               "Action": [
@@ -1355,8 +1376,8 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1383,8 +1404,660 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRoleForTarget52e03eB10A98F4",
+              "Arn",
+            ],
+          },
+        },
+      },
+      "Type": "AWS::Scheduler::Schedule",
+    },
+    "SchedulerRoleForTarget52e03eB10A98F4": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId",
+                  },
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":scheduler:",
+                        {
+                          "Ref": "AWS::Region",
+                        },
+                        ":",
+                        {
+                          "Ref": "AWS::AccountId",
+                        },
+                        ":schedule-group/default",
+                      ],
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SchedulerRoleForTarget52e03eDefaultPolicyBA384A27": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAliasliveE8928CBE",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "SchedulerRoleForTarget52e03eDefaultPolicyBA384A27",
+        "Roles": [
+          {
+            "Ref": "SchedulerRoleForTarget52e03eB10A98F4",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`RDSDatabaseRunningScheduleStack failure detection enabled with an alarm topic Should match snapshot 1`] = `
+{
+  "Mappings": {
+    "ParamsandsecretslayerMap": {
+      "af-south-1": {
+        "1x0x103xarm64": "arn:aws:lambda:af-south-1:317013901791:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "ap-east-1": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-east-1:768336418462:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "ap-northeast-1": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-northeast-1:133490724326:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "ap-northeast-2": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-northeast-2:738900069198:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "ap-south-1": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-south-1:176022468876:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "ap-southeast-1": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-southeast-1:044395824272:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "ap-southeast-2": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-southeast-2:665172237481:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "ap-southeast-3": {
+        "1x0x103xarm64": "arn:aws:lambda:ap-southeast-3:490737872127:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "ca-central-1": {
+        "1x0x103xarm64": "arn:aws:lambda:ca-central-1:200266452380:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "eu-central-1": {
+        "1x0x103xarm64": "arn:aws:lambda:eu-central-1:187925254637:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "eu-north-1": {
+        "1x0x103xarm64": "arn:aws:lambda:eu-north-1:427196147048:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "eu-south-1": {
+        "1x0x103xarm64": "arn:aws:lambda:eu-south-1:325218067255:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "eu-west-1": {
+        "1x0x103xarm64": "arn:aws:lambda:eu-west-1:015030872274:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "eu-west-2": {
+        "1x0x103xarm64": "arn:aws:lambda:eu-west-2:133256977650:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "eu-west-3": {
+        "1x0x103xarm64": "arn:aws:lambda:eu-west-3:780235371811:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "me-south-1": {
+        "1x0x103xarm64": "arn:aws:lambda:me-south-1:832021897121:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "sa-east-1": {
+        "1x0x103xarm64": "arn:aws:lambda:sa-east-1:933737806257:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "us-east-1": {
+        "1x0x103xarm64": "arn:aws:lambda:us-east-1:177933569100:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "us-east-2": {
+        "1x0x103xarm64": "arn:aws:lambda:us-east-2:590474943231:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+      "us-west-1": {
+        "1x0x103xarm64": "arn:aws:lambda:us-west-1:997803712105:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:1",
+      },
+      "us-west-2": {
+        "1x0x103xarm64": "arn:aws:lambda:us-west-2:345057560386:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:4",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "RDSDatabaseRunningSchedulerFailureDetectorLambdaErrorsAlarmEC7DB0F7": {
+      "Properties": {
+        "AlarmActions": [
+          "arn:aws:sns:ap-northeast-1:123456789012:alarm-topic",
+        ],
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAE0B70F3",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "Errors",
+        "Namespace": "AWS/Lambda",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorLambdaThrottlesAlarm8A413219": {
+      "Properties": {
+        "AlarmActions": [
+          "arn:aws:sns:ap-northeast-1:123456789012:alarm-topic",
+        ],
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAE0B70F3",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "Throttles",
+        "Namespace": "AWS/Lambda",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorResourceStatusUnexpectedAlarm145CB659": {
+      "Properties": {
+        "AlarmActions": [
+          "arn:aws:sns:ap-northeast-1:123456789012:alarm-topic",
+        ],
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "EvaluationPeriods": 1,
+        "MetricName": "ResourceStatusUnexpected",
+        "Namespace": "RDSDatabaseRunningScheduler",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorResourceStatusUnexpectedMetricD1740168": {
+      "Properties": {
+        "FilterPattern": ""ResourceStatusUnexpected"",
+        "LogGroupName": {
+          "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "ResourceStatusUnexpected",
+            "MetricNamespace": "RDSDatabaseRunningScheduler",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorResourceWaitTimedOutAlarm0DECC0A4": {
+      "Properties": {
+        "AlarmActions": [
+          "arn:aws:sns:ap-northeast-1:123456789012:alarm-topic",
+        ],
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "EvaluationPeriods": 1,
+        "MetricName": "ResourceWaitTimedOut",
+        "Namespace": "RDSDatabaseRunningScheduler",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorResourceWaitTimedOutMetric192EFA91": {
+      "Properties": {
+        "FilterPattern": ""ResourceWaitTimedOut"",
+        "LogGroupName": {
+          "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "ResourceWaitTimedOut",
+            "MetricNamespace": "RDSDatabaseRunningScheduler",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorScheduleExecutionFailedAlarm07A28F3D": {
+      "Properties": {
+        "AlarmActions": [
+          "arn:aws:sns:ap-northeast-1:123456789012:alarm-topic",
+        ],
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "EvaluationPeriods": 1,
+        "MetricName": "ScheduleExecutionFailed",
+        "Namespace": "RDSDatabaseRunningScheduler",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RDSDatabaseRunningSchedulerFailureDetectorScheduleExecutionFailedMetric58F4A995": {
+      "Properties": {
+        "FilterPattern": ""ScheduleExecutionFailed"",
+        "LogGroupName": {
+          "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "ScheduleExecutionFailed",
+            "MetricNamespace": "RDSDatabaseRunningScheduler",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionAE0B70F3": {
+      "DependsOn": [
+        "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDefaultPolicy5EC9C3E8",
+        "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "S3Bucket": {
+            "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
+          },
+          "S3Key": "20218dee83f1c5feb2e986a6a6367bdd7faa2b353a791a672d7db0b4936c9771.zip",
+        },
+        "Description": "A function to run the scheduled RDS Database or Cluster.",
+        "DurableConfig": {
+          "ExecutionTimeout": 7200,
+          "RetentionPeriodInDays": 1,
+        },
+        "Environment": {
+          "Variables": {
+            "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
+            "MAX_WAIT_SECONDS": "1800",
+            "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "true",
+            "PARAMETERS_SECRETS_EXTENSION_CACHE_ENABLED": "true",
+            "PARAMETERS_SECRETS_EXTENSION_CACHE_SIZE": "500",
+            "PARAMETERS_SECRETS_EXTENSION_HTTP_PORT": "2773",
+            "PARAMETERS_SECRETS_EXTENSION_LOG_LEVEL": "info",
+            "PARAMETERS_SECRETS_EXTENSION_MAX_CONNECTIONS": "3",
+            "SECRETS_MANAGER_TIMEOUT_MILLIS": "0",
+            "SECRETS_MANAGER_TTL": "300",
+            "SLACK_SECRET_NAME": "example/slack/webhook",
+            "SSM_PARAMETER_STORE_TIMEOUT_MILLIS": "0",
+            "SSM_PARAMETER_STORE_TTL": "300",
+            "TARGET_REGIONS": "[]",
+            "WAIT_INTERVAL_SECONDS": "60",
+          },
+        },
+        "Handler": "index.handler",
+        "Layers": [
+          {
+            "Fn::FindInMap": [
+              "ParamsandsecretslayerMap",
+              {
+                "Ref": "AWS::Region",
+              },
+              "1x0x103xarm64",
+            ],
+          },
+        ],
+        "LoggingConfig": {
+          "ApplicationLogLevel": "INFO",
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F",
+          },
+          "SystemLogLevel": "INFO",
+        },
+        "MemorySize": 512,
+        "Role": {
+          "Fn::GetAtt": [
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs24.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionAliasliveE8928CBE": {
+      "Properties": {
+        "FunctionName": {
+          "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAE0B70F3",
+        },
+        "FunctionVersion": {
+          "Fn::GetAtt": [
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d",
+            "Version",
+          ],
+        },
+        "Name": "live",
+      },
+      "Type": "AWS::Lambda::Alias",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961fd16d2b40ca4e6015407ddd0c386424d": {
+      "Metadata": {
+        "aws:cdk:do-not-refactor": true,
+      },
+      "Properties": {
+        "FunctionName": {
+          "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAE0B70F3",
+        },
+      },
+      "Type": "AWS::Lambda::Version",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionEventInvokeConfig6F7C289F": {
+      "Properties": {
+        "FunctionName": {
+          "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAE0B70F3",
+        },
+        "MaximumRetryAttempts": 2,
+        "Qualifier": "$LATEST",
+      },
+      "Type": "AWS::Lambda::EventInvokeConfig",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F": {
+      "DeletionPolicy": "RetainExceptOnCreate",
+      "Properties": {
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "A role to control the RDS Database or Cluster.",
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicDurableExecutionRolePolicy",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDefaultPolicy5EC9C3E8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "tag:GetResources",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "GetResources",
+            },
+            {
+              "Action": "ec2:DescribeRegions",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DescribeRegions",
+            },
+            {
+              "Action": [
+                "rds:DescribeDBInstances",
+                "rds:DescribeDBClusters",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "RdsDescribe",
+            },
+            {
+              "Action": [
+                "rds:StartDBInstance",
+                "rds:StartDBCluster",
+                "rds:StopDBInstance",
+                "rds:StopDBCluster",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/WorkHoursRunning": [
+                    "YES",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":db:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":rds:*:",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":cluster:*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "RdsRunningControl",
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:",
+                    {
+                      "Ref": "AWS::Region",
+                    },
+                    ":",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":secret:example/slack/webhook-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDefaultPolicy5EC9C3E8",
+        "Roles": [
+          {
+            "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "RDSDatabaseRunningSchedulerRunningStartScheduleB533179F": {
+      "Properties": {
+        "Description": "running start schedule",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF",
+        },
+        "ScheduleExpression": "cron(50 7 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Etc/UTC",
+        "State": "ENABLED",
+        "Target": {
+          "Arn": {
+            "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAliasliveE8928CBE",
+          },
+          "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRoleForTarget52e03eB10A98F4",
+              "Arn",
+            ],
+          },
+        },
+      },
+      "Type": "AWS::Scheduler::Schedule",
+    },
+    "RDSDatabaseRunningSchedulerRunningStopScheduleC0B44E8E": {
+      "Properties": {
+        "Description": "running stop schedule",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF",
+        },
+        "ScheduleExpression": "cron(5 19 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Etc/UTC",
+        "State": "ENABLED",
+        "Target": {
+          "Arn": {
+            "Ref": "RDSDatabaseRunningSchedulerRunningScheduleFunctionAliasliveE8928CBE",
+          },
+          "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1517,7 +2190,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1a00bcbefff4230e3b89116bf135de5b29bc260158220c2d1b30ad319eed5d9f.zip",
+          "S3Key": "20218dee83f1c5feb2e986a6a6367bdd7faa2b353a791a672d7db0b4936c9771.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1529,6 +2202,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
             "MAX_WAIT_SECONDS": "1800",
             "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "false",
+            "TARGET_REGIONS": "[]",
             "WAIT_INTERVAL_SECONDS": "60",
           },
         },
@@ -1560,7 +2234,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961632fe8418af94156b79d4f234d449b98",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961f70ff6567b6091665ac56e33fbc90a68",
             "Version",
           ],
         },
@@ -1568,7 +2242,7 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961632fe8418af94156b79d4f234d449b98": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961f70ff6567b6091665ac56e33fbc90a68": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1590,12 +2264,12 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
       "Type": "AWS::Lambda::EventInvokeConfig",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Properties": {
         "RetentionInDays": 90,
       },
       "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE": {
       "Properties": {
@@ -1650,6 +2324,12 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
               "Effect": "Allow",
               "Resource": "*",
               "Sid": "GetResources",
+            },
+            {
+              "Action": "ec2:DescribeRegions",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DescribeRegions",
             },
             {
               "Action": [
@@ -1738,8 +2418,8 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1766,8 +2446,8 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1900,7 +2580,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "1a00bcbefff4230e3b89116bf135de5b29bc260158220c2d1b30ad319eed5d9f.zip",
+          "S3Key": "20218dee83f1c5feb2e986a6a6367bdd7faa2b353a791a672d7db0b4936c9771.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1912,6 +2592,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
             "AWS_NODEJS_CONNECTION_REUSE_ENABLED": "1",
             "MAX_WAIT_SECONDS": "1800",
             "NOTIFY_SLACK_ON_WAIT_TIMEOUT": "false",
+            "TARGET_REGIONS": "[]",
             "WAIT_INTERVAL_SECONDS": "60",
           },
         },
@@ -1943,7 +2624,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961632fe8418af94156b79d4f234d449b98",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961f70ff6567b6091665ac56e33fbc90a68",
             "Version",
           ],
         },
@@ -1951,7 +2632,7 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961632fe8418af94156b79d4f234d449b98": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961f70ff6567b6091665ac56e33fbc90a68": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1973,12 +2654,12 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
       "Type": "AWS::Lambda::EventInvokeConfig",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionLogGroup1F20E46F": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Properties": {
         "RetentionInDays": 90,
       },
       "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
     "RDSDatabaseRunningSchedulerRunningScheduleFunctionRoleDF9E41FE": {
       "Properties": {
@@ -2033,6 +2714,12 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
               "Effect": "Allow",
               "Resource": "*",
               "Sid": "GetResources",
+            },
+            {
+              "Action": "ec2:DescribeRegions",
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DescribeRegions",
             },
             {
               "Action": [
@@ -2121,8 +2808,8 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -2149,8 +2836,8 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [

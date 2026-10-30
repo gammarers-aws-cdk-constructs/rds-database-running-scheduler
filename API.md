@@ -6,14 +6,19 @@
 
 CDK construct that provisions a durable Lambda workflow and EventBridge schedules to start/stop tagged RDS databases and clusters.
 
-The Lambda discovers matching resources account-wide via the Resource Groups
-Tagging API, deduplicates Aurora cluster member instances when the parent
-cluster is also tagged, and controls each remaining resource using the
-region encoded in its ARN. Each resource is checked on a configurable interval
-until it reaches a stable state or the per-resource wait limit. When Slack is
-enabled, the Lambda posts progress and results to Slack, and can post a timeout
-message when the wait limit is exceeded. Otherwise Secrets Manager lookup, Slack
-API calls, and related IAM grants are skipped.
+The Lambda lists the regions enabled for the account, searches each one with
+the Resource Groups Tagging API (or only the regions in `targetRegions`),
+deduplicates Aurora cluster member instances when the parent cluster is also
+tagged, and controls each remaining resource using the region encoded in its
+ARN. Each resource is checked on a configurable interval
+until it reaches a stable state or the per-resource wait limit. A failed
+schedule invocation is retried at most twice, and only while the original
+event is less than 2 hours old, so a stop failure is not replayed after the
+next start. When Slack is enabled, the Lambda posts progress and results to
+Slack, and can post a timeout message when the wait limit is exceeded.
+Otherwise Secrets Manager lookup, Slack API calls, and related IAM grants
+are skipped. When `failureDetection.enabled` is `true`, CloudWatch alarms
+watch the Lambda and the handler's failure logs.
 
 #### Initializers <a name="Initializers" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.Initializer"></a>
 
@@ -138,6 +143,7 @@ Any object.
 | **Name** | **Type** | **Description** |
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.property.node">node</a></code> | <code>constructs.Node</code> | The tree node. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduler.property.failureDetector">failureDetector</a></code> | <code>lambda-failure-detector.LambdaFailureDetector</code> | Failure detection alarms of the scheduler Lambda. |
 
 ---
 
@@ -153,10 +159,24 @@ The tree node.
 
 ---
 
+##### `failureDetector`<sup>Optional</sup> <a name="failureDetector" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler.property.failureDetector"></a>
+
+```typescript
+public readonly failureDetector: LambdaFailureDetector;
+```
+
+- *Type:* lambda-failure-detector.LambdaFailureDetector
+
+Failure detection alarms of the scheduler Lambda.
+
+Undefined unless `failureDetection.enabled` is `true`.
+
+---
+
 
 ### RDSDatabaseRunningScheduleStack <a name="RDSDatabaseRunningScheduleStack" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStack"></a>
 
-CDK stack that provisions scheduled start/stop control for tagged RDS resources in the deployment account.
+CDK stack that provisions scheduled start/stop control for tagged RDS resources in the enabled regions of the deployment account, or only in `targetRegions`.
 
 Delegates resource discovery, cluster-priority deduplication, start/stop
 execution, per-resource wait limits, and optional Slack notifications to
@@ -1172,10 +1192,12 @@ const rDSDatabaseRunningSchedulerProps: RDSDatabaseRunningSchedulerProps = { ...
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.enableScheduling">enableScheduling</a></code> | <code><a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a></code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.failureDetection">failureDetection</a></code> | <code>lambda-failure-detector.LambdaFailureDetection</code> | Opt-in CloudWatch failure detection for the scheduler Lambda. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for stop schedule cron configuration. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetRegions">targetRegions</a></code> | <code>string[]</code> | Regions searched for tagged RDS instances and clusters. |
 
 ---
 
@@ -1201,6 +1223,27 @@ public readonly enableScheduling: SchedulingEnable;
 - *Default:* SchedulingEnable.ENABLED
 
 Enables or disables both start and stop schedules.
+
+---
+
+##### `failureDetection`<sup>Optional</sup> <a name="failureDetection" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.failureDetection"></a>
+
+```typescript
+public readonly failureDetection: LambdaFailureDetection;
+```
+
+- *Type:* lambda-failure-detector.LambdaFailureDetection
+- *Default:* no failure detection resources are created
+
+Opt-in CloudWatch failure detection for the scheduler Lambda.
+
+Alarms are created only when `failureDetection.enabled` is `true`. They cover the
+Lambda `Errors` and `Throttles` metrics and three log-based signals from the handler:
+a resource wait timeout, an unexpected resource status, and any failed execution.
+A durable execution that fails inside the handler does not always raise the Lambda
+`Errors` metric, so the log-based alarms are the reliable signal for those failures.
+Set `alarmTopic` to attach an existing SNS topic to every alarm. The construct never
+creates an SNS topic, and without `alarmTopic` the alarms have no notification actions.
 
 ---
 
@@ -1257,6 +1300,22 @@ Optional override for stop schedule cron configuration.
 
 ---
 
+##### `targetRegions`<sup>Optional</sup> <a name="targetRegions" id="rds-database-running-scheduler.RDSDatabaseRunningSchedulerProps.property.targetRegions"></a>
+
+```typescript
+public readonly targetRegions: string[];
+```
+
+- *Type:* string[]
+- *Default:* every region enabled for the account
+
+Regions searched for tagged RDS instances and clusters.
+
+Each name must be a region enabled for the account. When specified, the array
+must not be empty and must not contain blank or duplicate names.
+
+---
+
 ### RDSDatabaseRunningScheduleStackProps <a name="RDSDatabaseRunningScheduleStackProps" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps"></a>
 
 Properties for the RDS database running schedule stack.
@@ -1278,10 +1337,12 @@ const rDSDatabaseRunningScheduleStackProps: RDSDatabaseRunningScheduleStackProps
 | --- | --- | --- |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetResource">targetResource</a></code> | <code><a href="#rds-database-running-scheduler.TargetResource">TargetResource</a></code> | Tag filter to select RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.enableScheduling">enableScheduling</a></code> | <code><a href="#rds-database-running-scheduler.SchedulingEnable">SchedulingEnable</a></code> | Enables or disables both start and stop schedules. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.failureDetection">failureDetection</a></code> | <code>lambda-failure-detector.LambdaFailureDetection</code> | Opt-in CloudWatch failure detection for the scheduler Lambda. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.notification">notification</a></code> | <code><a href="#rds-database-running-scheduler.Notification">Notification</a></code> | Optional notification channels. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.resourceWait">resourceWait</a></code> | <code><a href="#rds-database-running-scheduler.ResourceWait">ResourceWait</a></code> | Optional per-resource wait settings. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.startSchedule">startSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for start schedule cron configuration. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.stopSchedule">stopSchedule</a></code> | <code><a href="#rds-database-running-scheduler.Schedule">Schedule</a></code> | Optional override for stop schedule cron configuration. |
+| <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetRegions">targetRegions</a></code> | <code>string[]</code> | Regions searched for tagged RDS instances and clusters. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.analyticsReporting">analyticsReporting</a></code> | <code>boolean</code> | Include runtime versioning information in this Stack. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.crossRegionReferences">crossRegionReferences</a></code> | <code>boolean</code> | Enable this flag to allow native cross region stack references. |
 | <code><a href="#rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.description">description</a></code> | <code>string</code> | A description of the stack. |
@@ -1319,6 +1380,27 @@ public readonly enableScheduling: SchedulingEnable;
 - *Default:* SchedulingEnable.ENABLED
 
 Enables or disables both start and stop schedules.
+
+---
+
+##### `failureDetection`<sup>Optional</sup> <a name="failureDetection" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.failureDetection"></a>
+
+```typescript
+public readonly failureDetection: LambdaFailureDetection;
+```
+
+- *Type:* lambda-failure-detector.LambdaFailureDetection
+- *Default:* no failure detection resources are created
+
+Opt-in CloudWatch failure detection for the scheduler Lambda.
+
+Alarms are created only when `failureDetection.enabled` is `true`. They cover the
+Lambda `Errors` and `Throttles` metrics and three log-based signals from the handler:
+a resource wait timeout, an unexpected resource status, and any failed execution.
+A durable execution that fails inside the handler does not always raise the Lambda
+`Errors` metric, so the log-based alarms are the reliable signal for those failures.
+Set `alarmTopic` to attach an existing SNS topic to every alarm. The construct never
+creates an SNS topic, and without `alarmTopic` the alarms have no notification actions.
 
 ---
 
@@ -1372,6 +1454,22 @@ public readonly stopSchedule: Schedule;
 - *Type:* <a href="#rds-database-running-scheduler.Schedule">Schedule</a>
 
 Optional override for stop schedule cron configuration.
+
+---
+
+##### `targetRegions`<sup>Optional</sup> <a name="targetRegions" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStackProps.property.targetRegions"></a>
+
+```typescript
+public readonly targetRegions: string[];
+```
+
+- *Type:* string[]
+- *Default:* every region enabled for the account
+
+Regions searched for tagged RDS instances and clusters.
+
+Each name must be a region enabled for the account. When specified, the array
+must not be empty and must not contain blank or duplicate names.
 
 ---
 

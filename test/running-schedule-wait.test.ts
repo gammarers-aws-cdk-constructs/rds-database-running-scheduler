@@ -1,4 +1,8 @@
-import { RdsDatabaseRunningSchedulerValidateError } from '../src/funcs/core/running-schedule-errors';
+import {
+  RdsDatabaseRunningSchedulerStatusError,
+  RdsDatabaseRunningSchedulerTimeoutError,
+  RdsDatabaseRunningSchedulerValidateError,
+} from '../src/funcs/core/running-schedule-errors';
 import {
   decideResourceAction,
   hasWaitBudget,
@@ -6,8 +10,19 @@ import {
   resolveResourceWait,
   shouldContinueWaitLoop,
   TRANSITIONING_STATES,
+  type NextWaitStepOptions,
 } from '../src/funcs/core/running-schedule-wait';
 import { MAX_WAIT_SECONDS_LIMIT } from '../src/settings/consts';
+
+const waitOptions = (overrides: Partial<NextWaitStepOptions> = {}): NextWaitStepOptions => ({
+  mode: 'Start',
+  current: 'available',
+  elapsedWaitSeconds: 0,
+  intervalSeconds: 60,
+  maxWaitSeconds: 1800,
+  resourceLabel: 'type=db identifier=test-db',
+  ...overrides,
+});
 
 describe('decideResourceAction', () => {
   it.each([
@@ -105,34 +120,86 @@ describe('nextWaitStep', () => {
       expected: { kind: 'pause', command: 'none' },
     },
     {
-      name: 'times out when the next interval would exceed the maximum',
+      name: 'waits without starting while Start sees storage-optimization',
       mode: 'Start' as const,
-      current: 'starting',
-      elapsed: 60,
-      interval: 60,
-      max: 60,
-      expected: { kind: 'timed-out' },
-    },
-    {
-      name: 'times out a stopped resource when no budget remains for start',
-      mode: 'Start' as const,
-      current: 'stopped',
-      elapsed: 120,
-      interval: 60,
-      max: 120,
-      expected: { kind: 'timed-out' },
-    },
-    {
-      name: 'fails on an unexpected status',
-      mode: 'Stop' as const,
-      current: 'incompatible-restore',
+      current: 'storage-optimization',
       elapsed: 0,
       interval: 60,
       max: 1800,
-      expected: { kind: 'fail', current: 'incompatible-restore' },
+      expected: { kind: 'pause', command: 'none' },
+    },
+    {
+      name: 'waits without failing while Stop sees storage-optimization',
+      mode: 'Stop' as const,
+      current: 'storage-optimization',
+      elapsed: 0,
+      interval: 60,
+      max: 1800,
+      expected: { kind: 'pause', command: 'none' },
     },
   ])('$name', ({ mode, current, elapsed, interval, max, expected }) => {
-    expect(nextWaitStep(mode, current, elapsed, interval, max)).toEqual(expected);
+    expect(nextWaitStep(waitOptions({
+      mode,
+      current,
+      elapsedWaitSeconds: elapsed,
+      intervalSeconds: interval,
+      maxWaitSeconds: max,
+    }))).toEqual(expected);
+  });
+
+  it.each([
+    {
+      name: 'the next interval would exceed the maximum',
+      mode: 'Start' as const,
+      current: 'starting',
+      elapsed: 60,
+      max: 60,
+    },
+    {
+      name: 'no budget remains to start a stopped resource',
+      mode: 'Start' as const,
+      current: 'stopped',
+      elapsed: 120,
+      max: 120,
+    },
+    {
+      name: 'no budget remains while Stop sees storage-optimization',
+      mode: 'Stop' as const,
+      current: 'storage-optimization',
+      elapsed: 1800,
+      max: 1800,
+    },
+  ])('throws a timeout error when $name', ({ mode, current, elapsed, max }) => {
+    const act = () => nextWaitStep(waitOptions({
+      mode,
+      current,
+      elapsedWaitSeconds: elapsed,
+      maxWaitSeconds: max,
+    }));
+
+    expect(act).toThrow(RdsDatabaseRunningSchedulerTimeoutError);
+    expect(act).toThrow(`wait timed out: type=db identifier=test-db maxWaitSeconds=${max}`);
+  });
+
+  it.each([
+    { mode: 'Stop' as const, current: 'incompatible-restore' },
+    { mode: 'Start' as const, current: 'incompatible-parameters' },
+  ])('throws a status error when $mode sees $current', ({ mode, current }) => {
+    const act = () => nextWaitStep(waitOptions({ mode, current }));
+
+    expect(act).toThrow(RdsDatabaseRunningSchedulerStatusError);
+    expect(act).toThrow(`db instance or cluster status fail: type=db identifier=test-db current=${current}`);
+  });
+
+  it('reports an unexpected status before the wait budget is checked', () => {
+    const act = () => nextWaitStep(waitOptions({
+      mode: 'Stop',
+      current: 'incompatible-restore',
+      elapsedWaitSeconds: 1800,
+      maxWaitSeconds: 1800,
+    }));
+
+    expect(act).toThrow(RdsDatabaseRunningSchedulerStatusError);
   });
 });
 
@@ -140,7 +207,6 @@ describe('shouldContinueWaitLoop', () => {
   it.each([
     { signal: 'open' as const, expected: true },
     { signal: 'settled' as const, expected: false },
-    { signal: 'failed' as const, expected: false },
   ])('returns $expected when the signal is $signal', ({ signal, expected }) => {
     expect(shouldContinueWaitLoop(signal)).toBe(expected);
   });
