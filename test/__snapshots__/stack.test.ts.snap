@@ -359,8 +359,8 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -387,8 +387,8 @@ exports[`RDSDatabaseRunningScheduleStack custom start/stop schedule Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -857,8 +857,8 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -885,8 +885,8 @@ exports[`RDSDatabaseRunningScheduleStack default schedule with Slack Should matc
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1355,8 +1355,8 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1383,8 +1383,8 @@ exports[`RDSDatabaseRunningScheduleStack disabled scheduling Should match snapsh
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1738,8 +1738,8 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -1766,8 +1766,8 @@ exports[`RDSDatabaseRunningScheduleStack slack.enable false with secretName Shou
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -2121,8 +2121,8 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Start"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [
@@ -2149,8 +2149,8 @@ exports[`RDSDatabaseRunningScheduleStack without Slack notification Should match
           },
           "Input": "{"Params":{"TagKey":"WorkHoursRunning","TagValues":["YES"],"Mode":"Stop"}}",
           "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 185,
+            "MaximumEventAgeInSeconds": 7200,
+            "MaximumRetryAttempts": 2,
           },
           "RoleArn": {
             "Fn::GetAtt": [

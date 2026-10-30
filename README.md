@@ -23,7 +23,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 
 ## How it works
 
-EventBridge Scheduler runs a start cron and a stop cron. Each one invokes a durable Lambda function.
+EventBridge Scheduler runs a start cron and a stop cron. Each one invokes a durable Lambda function. A failed invocation is retried at most twice, and only while the original event is less than 2 hours old. That window matches the durable execution timeout and is not configurable via props today. On the default schedule it ends before the opposite cron, so a failed stop is not run again after the next start.
 
 The function searches the deployment account for RDS DB instances and Aurora clusters that match `targetResource`. When both a cluster and its member instances match, only the cluster is controlled. Each remaining resource is started or stopped in the region taken from its ARN.
 

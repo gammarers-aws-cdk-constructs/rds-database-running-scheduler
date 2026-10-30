@@ -259,6 +259,18 @@ const rdsResourceTagCondition = (
 });
 
 /**
+ * Failed schedule invocations stay inside one cron firing.
+ *
+ * Two attempts and a 2-hour event age match the durable execution timeout.
+ * On the default schedule the shorter gap is 11 hours 15 minutes (07:50 start
+ * to 19:05 stop), so a retry that begins at the end of this window still
+ * finishes before the opposite cron. A failed stop does not run again after
+ * the next morning's start. These values are not configurable via props.
+ */
+const SCHEDULE_RETRY_ATTEMPTS = 2;
+const SCHEDULE_MAX_EVENT_AGE = Duration.hours(2);
+
+/**
  * CDK construct that provisions a durable Lambda workflow and EventBridge
  * schedules to start/stop tagged RDS databases and clusters.
  *
@@ -266,10 +278,13 @@ const rdsResourceTagCondition = (
  * Tagging API, deduplicates Aurora cluster member instances when the parent
  * cluster is also tagged, and controls each remaining resource using the
  * region encoded in its ARN. Each resource is checked on a configurable interval
- * until it reaches a stable state or the per-resource wait limit. When Slack is
- * enabled, the Lambda posts progress and results to Slack, and can post a timeout
- * message when the wait limit is exceeded. Otherwise Secrets Manager lookup, Slack
- * API calls, and related IAM grants are skipped.
+ * until it reaches a stable state or the per-resource wait limit. A failed
+ * schedule invocation is retried at most twice, and only while the original
+ * event is less than 2 hours old, so a stop failure is not replayed after the
+ * next start. When Slack is enabled, the Lambda posts progress and results to
+ * Slack, and can post a timeout message when the wait limit is exceeded.
+ * Otherwise Secrets Manager lookup, Slack API calls, and related IAM grants
+ * are skipped.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**
@@ -388,6 +403,8 @@ export class RDSDatabaseRunningScheduler extends Construct {
         timeZone: props.startSchedule?.timezone ?? TimeZone.ETC_UTC,
       }),
       target: new targets.LambdaInvoke(runningScheduleFunctionAlias, {
+        retryAttempts: SCHEDULE_RETRY_ATTEMPTS,
+        maxEventAge: SCHEDULE_MAX_EVENT_AGE,
         input: scheduler.ScheduleTargetInput.fromObject({
           Params: {
             TagKey: props.targetResource.tagKey,
@@ -408,6 +425,8 @@ export class RDSDatabaseRunningScheduler extends Construct {
         timeZone: props.stopSchedule?.timezone ?? TimeZone.ETC_UTC,
       }),
       target: new targets.LambdaInvoke(runningScheduleFunctionAlias, {
+        retryAttempts: SCHEDULE_RETRY_ATTEMPTS,
+        maxEventAge: SCHEDULE_MAX_EVENT_AGE,
         input: scheduler.ScheduleTargetInput.fromObject({
           Params: {
             TagKey: props.targetResource.tagKey,

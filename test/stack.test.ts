@@ -41,8 +41,8 @@ describe('RDSDatabaseRunningScheduleStack', () => {
           RoleArn: Match.anyValue(),
           Input: Match.anyValue(),
           RetryPolicy: {
-            MaximumEventAgeInSeconds: 86400,
-            MaximumRetryAttempts: 185,
+            MaximumEventAgeInSeconds: 7200,
+            MaximumRetryAttempts: 2,
           },
         },
       });
@@ -262,8 +262,8 @@ describe('RDSDatabaseRunningScheduleStack', () => {
           RoleArn: Match.anyValue(),
           Input: Match.anyValue(),
           RetryPolicy: {
-            MaximumEventAgeInSeconds: 86400,
-            MaximumRetryAttempts: 185,
+            MaximumEventAgeInSeconds: 7200,
+            MaximumRetryAttempts: 2,
           },
         },
       });
@@ -309,8 +309,8 @@ describe('RDSDatabaseRunningScheduleStack', () => {
           RoleArn: Match.anyValue(),
           Input: Match.anyValue(),
           RetryPolicy: {
-            MaximumEventAgeInSeconds: 86400,
-            MaximumRetryAttempts: 185,
+            MaximumEventAgeInSeconds: 7200,
+            MaximumRetryAttempts: 2,
           },
         },
       });
