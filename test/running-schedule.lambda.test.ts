@@ -781,6 +781,138 @@ describe('running-schedule.lambda', () => {
     });
   });
 
+  describe('backup deferral', () => {
+    const deferredDbReason = 'Stop deferred for DB test-db: status is backing-up. The next stop schedule will try again.';
+
+    it('defers a stop during backup without waiting or failing', async () => {
+      mockEnv({ WAIT_INTERVAL_SECONDS: 60, MAX_WAIT_SECONDS: 60 });
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'backing-up', Engine: 'postgres' }],
+      });
+
+      const { run, result } = await runToSuccess('Stop');
+
+      expect(result.results[0]).toMatchObject({
+        status: 'deferred',
+        identifier: 'test-db',
+        reason: deferredDbReason,
+      });
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+      expect(waitsOf(run.execution)).toEqual([]);
+      expect(mockPostMessage).toHaveBeenCalledTimes(2);
+      expect(mockPostMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            color: '#ecb22e',
+            pretext: deferredDbReason,
+            fields: expect.arrayContaining([
+              { title: 'Status', value: 'DEFERRED', short: true },
+              { title: 'Reason', value: deferredDbReason, short: false },
+            ]),
+          }),
+        ],
+      }));
+    });
+
+    it('defers a cluster stop during backup', async () => {
+      mockDiscoveredResources([clusterArn]);
+      rdsMock.on(DescribeDBClustersCommand).resolves({
+        DBClusters: [{ Status: 'backing-up', Engine: 'aurora-mysql', EngineMode: 'provisioned' }],
+      });
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]).toMatchObject({
+        status: 'deferred',
+        reason: 'Stop deferred for cluster test-cluster: status is backing-up. The next stop schedule will try again.',
+      });
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBClusterCommand);
+    });
+
+    it('keeps waiting after stop was requested and the status becomes backing-up', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available', Engine: 'postgres' }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'backing-up', Engine: 'postgres' }] })
+        .resolves({ DBInstances: [{ DBInstanceStatus: 'stopped', Engine: 'postgres' }] });
+      rdsMock.on(StopDBInstanceCommand).resolves({});
+
+      const { run, result } = await runToSuccess('Stop');
+
+      expect(result.results[0]?.status).toBe('stopped');
+      expect(result.results[0]?.reason).toBeUndefined();
+      expect(rdsMock).toHaveReceivedCommandTimes(StopDBInstanceCommand, 1);
+      expect(waitsOf(run.execution)).toEqual([
+        { name: 'wait-db-test-db-0', seconds: 60 },
+        { name: 'wait-db-test-db-1', seconds: 60 },
+      ]);
+    });
+
+    it('still stops another database when one stop is deferred', async () => {
+      mockDiscoveredResources([dbArn, clusterArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'backing-up', Engine: 'postgres' }],
+      });
+      rdsMock.on(DescribeDBClustersCommand)
+        .resolvesOnce({
+          DBClusters: [{
+            Status: 'available',
+            Engine: 'aurora-mysql',
+            EngineMode: 'provisioned',
+            DBClusterMembers: [{ IsClusterWriter: true }],
+          }],
+        })
+        .resolves({
+          DBClusters: [{
+            Status: 'stopped',
+            Engine: 'aurora-mysql',
+            EngineMode: 'provisioned',
+            DBClusterMembers: [{ IsClusterWriter: true }],
+          }],
+        });
+      rdsMock.on(StopDBClusterCommand).resolves({});
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results.map((entry) => entry.status)).toEqual(['deferred', 'stopped']);
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+      expect(rdsMock).toHaveReceivedCommandWith(StopDBClusterCommand, { DBClusterIdentifier: 'test-cluster' });
+    });
+
+    it('waits through backing-up before starting', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'backing-up' }] })
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] })
+        .resolves({ DBInstances: [{ DBInstanceStatus: 'available' }] });
+      rdsMock.on(StartDBInstanceCommand).resolves({});
+
+      const { run, result } = await runToSuccess('Start');
+
+      expect(result.results[0]?.status).toBe('available');
+      expect(rdsMock).toHaveReceivedCommandTimes(StartDBInstanceCommand, 1);
+      expect(waitsOf(run.execution).map((wait) => wait.name)).toEqual([
+        'wait-db-test-db-0',
+        'wait-db-test-db-1',
+      ]);
+    });
+
+    it('records the deferred reason without Slack when Slack is disabled', async () => {
+      mockEnv({ SLACK_SECRET_NAME: '', NOTIFY_SLACK_ON_WAIT_TIMEOUT: false });
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'backing-up' }],
+      });
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]?.reason).toBe(deferredDbReason);
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+    });
+  });
+
   describe('error handling', () => {
     it('fails when the DB instance is not found', async () => {
       mockDiscoveredResources([dbArn]);

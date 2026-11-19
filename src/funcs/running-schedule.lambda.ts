@@ -61,8 +61,10 @@ import {
   nextWaitStep,
   RESOURCE_STATUS,
   resolveResourceWait,
+  STOP_REQUEST,
   shouldContinueWaitLoop,
   type ResolvedResourceWait,
+  type StopRequest,
   type WaitLoopSignal,
 } from './core/running-schedule-wait';
 
@@ -470,7 +472,8 @@ const describeTarget = async (
  * then starts the resource. Each wait uses `intervalSeconds`. Accumulated
  * waits stop at `maxSeconds`. A stop of RDS Custom, Aurora Serverless v1, or a
  * global database cluster the stop API rejects returns `skipped` with a reason
- * and does not call stop. Uses a region-specific RDS client derived from
+ * and does not call stop. A stop that sees `backing-up` before stop is called
+ * returns `deferred` and leaves the stop for the next schedule. Uses a region-specific RDS client derived from
  * the target ARN so resources outside the Lambda deployment region are handled
  * correctly.
  *
@@ -478,7 +481,7 @@ const describeTarget = async (
  * @param targetResource Target RDS resource ARN after cluster-priority deduplication.
  * @param mode Requested operation mode.
  * @param waitSettings Validated interval and maximum wait for this resource.
- * @returns Final processing result including status and resource metadata.
+ * @returns Final processing result, including a reason when a stop is skipped or deferred.
  * @throws {RdsDatabaseRunningSchedulerStatusError} When the resource reaches an unexpected status.
  * @throws {RdsDatabaseRunningSchedulerTimeoutError} When the wait budget is exhausted.
  * @throws {Error} When a DB instance is not found.
@@ -497,6 +500,7 @@ const processing = async (
   let elapsedWaitSeconds = 0;
   let signal: WaitLoopSignal = 'open';
   let outcome: ProcessingResult | undefined;
+  let stopRequest: StopRequest = STOP_REQUEST.NOT_SENT;
 
   const toResult = (status: string, reason?: string): ProcessingResult => {
     const result: ProcessingResult = {
@@ -544,11 +548,14 @@ const processing = async (
       intervalSeconds,
       maxWaitSeconds: maxSeconds,
       resourceLabel: `type=${target.type} identifier=${target.identifier}`,
+      type: target.type,
+      identifier: target.identifier,
+      stopRequest,
     });
 
     if (step.kind === 'finish') {
       signal = 'settled';
-      outcome = toResult(step.status);
+      outcome = toResult(step.status, step.reason);
     }
     // Step and wait names carry the iteration so each attempt stays unique across replays.
     if (step.kind === 'pause' && step.command === 'start' && target.type === 'db') {
@@ -570,6 +577,9 @@ const processing = async (
       await context.step(`stop-cluster-${target.identifier}-${iteration}`, async () => {
         await rds.send(new StopDBClusterCommand({ DBClusterIdentifier: target.identifier }));
       });
+    }
+    if (step.kind === 'pause' && step.command === 'stop') {
+      stopRequest = STOP_REQUEST.SENT;
     }
     if (step.kind === 'pause') {
       await context.wait(`wait-${target.type}-${target.identifier}-${iteration}`, { seconds: intervalSeconds });
@@ -615,6 +625,12 @@ const processing = async (
  * Slack notices for the ones that finish. After that, a failure of any resource fails
  * the execution. The error names up to 10 failed resources. The log lists every failed
  * resource and its error message.
+ *
+ * A stop of RDS Custom, Aurora Serverless v1, or an Aurora global database cluster
+ * the stop API rejects is skipped with a reason and does not fail the run.
+ * A stop that sees `backing-up` before stop is called is deferred to the next
+ * stop schedule, with a reason, and does not fail the run. A start still waits
+ * through `backing-up` and still runs those configurations.
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
@@ -726,7 +742,8 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
         const channel = slackChannel;
         if (result.reason !== undefined) {
           const reason = result.reason;
-          // A skipped stop is not a failure, so the thread uses a warning color.
+          const statusLabel = result.status === 'deferred' ? 'DEFERRED' : 'SKIPPED';
+          // A skipped or deferred stop is not a failure, so the thread uses a warning color.
           await childCtx.step('post-slack-child-messages', async () => {
             await client.chat.postMessage({
               channel,
@@ -740,7 +757,7 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
                     { title: 'Region', value: result.region, short: true },
                     { title: 'Type', value: result.type, short: true },
                     { title: 'Identifier', value: result.identifier, short: true },
-                    { title: 'Status', value: 'SKIPPED', short: true },
+                    { title: 'Status', value: statusLabel, short: true },
                     { title: 'Reason', value: reason, short: false },
                   ],
                 },

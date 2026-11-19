@@ -128,6 +128,7 @@ export interface ResourceWait {
   readonly intervalSeconds?: number;
   /**
    * Maximum accumulated wait seconds for one resource to reach a stable state.
+   * A stop that sees `backing-up` before stop is called does not use this budget.
    * Must be a positive integer, greater than or equal to `intervalSeconds`, and at most 6900
    * so the limit fires before the 2-hour durable execution timeout.
    * @default 1800
@@ -371,19 +372,27 @@ const RUNNING_SCHEDULER_LOG_FILTERS: LogFailureFilter[] = [
  * CDK construct that provisions a durable Lambda workflow and EventBridge
  * schedules to start/stop tagged RDS databases and clusters.
  *
- * The Lambda lists the regions enabled for the account, searches each one with
- * the Resource Groups Tagging API (or only the regions in `targetRegions`),
- * deduplicates Aurora cluster member instances when the parent cluster is also
- * tagged, and controls each remaining resource using the region encoded in its
- * ARN. Each resource is checked on a configurable interval
- * until it reaches a stable state or the per-resource wait limit. A failed
+ * The Lambda lists the regions enabled for the account and searches each one
+ * with the Resource Groups Tagging API, following each page until the last.
+ * `targetRegions` limits that search. Aurora cluster member instances are
+ * deduplicated when the parent cluster is also tagged, and each remaining
+ * resource is controlled in the region encoded in its ARN.
+ *
+ * A resource is checked until it reaches a stable state or its wait limit.
+ * A stop that finds `backing-up` before calling stop is deferred to the next
+ * stop schedule. A stop the API would reject (RDS Custom, Aurora Serverless v1,
+ * or an Aurora global database cluster that is not the only cluster) is skipped.
+ * Both outcomes record a reason and do not fail the run. When one resource
+ * fails, the others are still processed, then the execution fails. A failed
  * schedule invocation is retried at most twice, and only while the original
  * event is less than 2 hours old, so a stop failure is not replayed after the
- * next start. When Slack is enabled, the Lambda posts progress and results to
- * Slack, and can post a timeout message when the wait limit is exceeded.
- * Otherwise Secrets Manager lookup, Slack API calls, and related IAM grants
- * are skipped. When `failureDetection.enabled` is `true`, CloudWatch alarms
- * watch the Lambda and the handler's failure logs.
+ * next start.
+ *
+ * When Slack is enabled, the Lambda posts progress, results, skip and defer
+ * reasons, and, by default, a timeout message. Otherwise Secrets Manager
+ * lookup, Slack API calls, and related IAM grants are skipped. When
+ * `failureDetection.enabled` is `true`, CloudWatch alarms watch the Lambda
+ * and the handler's failure logs.
  */
 export class RDSDatabaseRunningScheduler extends Construct {
   /**

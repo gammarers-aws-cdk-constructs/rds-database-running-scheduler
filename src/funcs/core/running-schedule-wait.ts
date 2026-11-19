@@ -27,6 +27,23 @@ export const RESOURCE_STATUS = {
   NOT_FOUND: 'not-found',
 } as const;
 
+/** RDS status while an automatic backup is running. */
+export const BACKING_UP_STATUS = 'backing-up';
+
+/**
+ * Whether this run has already called the stop API for the resource.
+ * A boolean is not used, so the two cases stay explicit.
+ */
+export const STOP_REQUEST = {
+  /** Stop has not been called yet. */
+  NOT_SENT: 'not-sent',
+  /** Stop has been called and the run is waiting for `stopped`. */
+  SENT: 'sent',
+} as const;
+
+/** Whether this run has already called the stop API for the resource. */
+export type StopRequest = typeof STOP_REQUEST[keyof typeof STOP_REQUEST];
+
 /**
  * RDS statuses that indicate an in-progress transition.
  *
@@ -35,11 +52,13 @@ export const RESOURCE_STATUS = {
  * as well. The caller waits while any of these is current and does not issue
  * start or stop. A start that sees `storage-optimization` waits until a later
  * observation is `stopped`, then the `stopped` action issues start.
+ * `backing-up` is included so a start, and a stop that was already requested,
+ * keep waiting. A stop that has not been requested yet defers instead.
  */
 export const TRANSITIONING_STATES = [
   'starting',
   'configuring-enhanced-monitoring',
-  'backing-up',
+  BACKING_UP_STATUS,
   'modifying',
   'stopping',
   'storage-optimization',
@@ -52,7 +71,7 @@ const TRANSITIONING_STATE_SET = new Set<string>(TRANSITIONING_STATES);
 /**
  * Next action for one observed status, before the wait budget is applied.
  */
-export type ResourceAction = 'not-found' | 'done' | 'start' | 'stop' | 'wait' | 'unexpected';
+export type ResourceAction = 'not-found' | 'done' | 'start' | 'stop' | 'wait' | 'defer' | 'unexpected';
 
 /**
  * Whether the status-check loop should run another iteration.
@@ -70,7 +89,9 @@ export type WaitCommand = 'start' | 'stop' | 'none';
 export type WaitStep =
   | {
     readonly kind: 'finish';
-    readonly status: 'skipped' | typeof RESOURCE_STATUS.AVAILABLE | typeof RESOURCE_STATUS.STOPPED;
+    readonly status: 'skipped' | 'deferred' | typeof RESOURCE_STATUS.AVAILABLE | typeof RESOURCE_STATUS.STOPPED;
+    /** Why a stop was deferred. Absent for a completed or missing resource. */
+    readonly reason?: string;
   }
   | { readonly kind: 'pause'; readonly command: WaitCommand };
 
@@ -94,16 +115,57 @@ export const isTransitioningState = (current: string): boolean =>
   TRANSITIONING_STATE_SET.has(current);
 
 /**
+ * One observed status, plus whether stop was already requested.
+ */
+export interface ResourceObservation {
+  /** Requested operation mode. */
+  readonly mode: RunningMode;
+  /** Current RDS status, or `not-found` when the resource is gone. */
+  readonly current: string;
+  /** Whether this run has already called the stop API. */
+  readonly stopRequest: StopRequest;
+}
+
+/**
+ * Returns whether a stop should wait for the next schedule instead of this run.
+ *
+ * @param observation Current status and whether stop was already requested.
+ * @returns `true` when stop has not been called and the database is backing up.
+ */
+const shouldDeferStop = (observation: ResourceObservation): boolean =>
+  observation.mode === RUNNING_MODE_STOP
+  && observation.current === BACKING_UP_STATUS
+  && observation.stopRequest === STOP_REQUEST.NOT_SENT;
+
+const resourceKindLabel = (type: 'db' | 'cluster'): string => {
+  if (type === 'db') {
+    return 'DB';
+  }
+  return 'cluster';
+};
+
+/**
+ * Reason stored when a stop is left for the next schedule.
+ *
+ * @param type Resource kind.
+ * @param identifier DB instance or cluster identifier.
+ * @returns Reason recorded on the execution result and in Slack.
+ */
+const stopDeferredReason = (type: 'db' | 'cluster', identifier: string): string =>
+  `Stop deferred for ${resourceKindLabel(type)} ${identifier}: status is backing-up. The next stop schedule will try again.`;
+
+/**
  * Maps an RDS status to the next action for the requested mode.
  *
- * @param mode Requested operation mode.
- * @param current Current RDS status, or `not-found` when the resource is gone.
+ * A stop that still has not been requested defers while the database is
+ * backing up, so a long automatic backup does not use the wait budget.
+ * After stop has been requested, `backing-up` is an ordinary transition.
+ *
+ * @param observation Current status and whether stop was already requested.
  * @returns Action to take before considering the wait budget.
  */
-export const decideResourceAction = (
-  mode: RunningMode,
-  current: string,
-): ResourceAction => {
+export const decideResourceAction = (observation: ResourceObservation): ResourceAction => {
+  const { mode, current } = observation;
   if (current === RESOURCE_STATUS.NOT_FOUND) {
     return 'not-found';
   }
@@ -118,6 +180,9 @@ export const decideResourceAction = (
   }
   if (mode === RUNNING_MODE_STOP && current === RESOURCE_STATUS.AVAILABLE) {
     return 'stop';
+  }
+  if (shouldDeferStop(observation)) {
+    return 'defer';
   }
   if (isTransitioningState(current)) {
     return 'wait';
@@ -155,12 +220,20 @@ export interface NextWaitStepOptions {
   readonly maxWaitSeconds: number;
   /** Resource description embedded in error messages, e.g. `type=db identifier=my-db`. */
   readonly resourceLabel: string;
+  /** Resource kind used in a deferred-stop reason. */
+  readonly type: 'db' | 'cluster';
+  /** DB instance or cluster identifier used in a deferred-stop reason. */
+  readonly identifier: string;
+  /** Whether this run has already called the stop API. */
+  readonly stopRequest: StopRequest;
 }
 
 /**
  * Chooses the next step from the current status and remaining wait budget.
  *
  * A stable or missing resource finishes even when the budget is exhausted.
+ * A stop that has not been requested finishes as deferred while the database
+ * is backing up, including when the wait budget is already exhausted.
  * Start, stop, and transitioning statuses throw when the next interval
  * would exceed the maximum.
  *
@@ -170,13 +243,26 @@ export interface NextWaitStepOptions {
  * @throws {RdsDatabaseRunningSchedulerTimeoutError} When the next interval would exceed the wait budget.
  */
 export const nextWaitStep = (options: NextWaitStepOptions): WaitStep => {
-  const { mode, current, elapsedWaitSeconds, intervalSeconds, maxWaitSeconds, resourceLabel } = options;
-  const action = decideResourceAction(mode, current);
+  const {
+    mode,
+    current,
+    elapsedWaitSeconds,
+    intervalSeconds,
+    maxWaitSeconds,
+    resourceLabel,
+    type,
+    identifier,
+    stopRequest,
+  } = options;
+  const action = decideResourceAction({ mode, current, stopRequest });
   if (action === 'not-found') {
     return { kind: 'finish', status: 'skipped' };
   }
   if (action === 'done' && (current === RESOURCE_STATUS.AVAILABLE || current === RESOURCE_STATUS.STOPPED)) {
     return { kind: 'finish', status: current };
+  }
+  if (action === 'defer') {
+    return { kind: 'finish', status: 'deferred', reason: stopDeferredReason(type, identifier) };
   }
   if (action === 'unexpected' || action === 'done') {
     throw new RdsDatabaseRunningSchedulerStatusError(

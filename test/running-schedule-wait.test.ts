@@ -4,13 +4,16 @@ import {
   RdsDatabaseRunningSchedulerValidateError,
 } from '../src/funcs/core/running-schedule-errors';
 import {
+  BACKING_UP_STATUS,
   decideResourceAction,
   hasWaitBudget,
   nextWaitStep,
   resolveResourceWait,
   shouldContinueWaitLoop,
+  STOP_REQUEST,
   TRANSITIONING_STATES,
   type NextWaitStepOptions,
+  type StopRequest,
 } from '../src/funcs/core/running-schedule-wait';
 import { MAX_WAIT_SECONDS_LIMIT } from '../src/settings/consts';
 
@@ -21,8 +24,17 @@ const waitOptions = (overrides: Partial<NextWaitStepOptions> = {}): NextWaitStep
   intervalSeconds: 60,
   maxWaitSeconds: 1800,
   resourceLabel: 'type=db identifier=test-db',
+  type: 'db',
+  identifier: 'test-db',
+  stopRequest: STOP_REQUEST.NOT_SENT,
   ...overrides,
 });
+
+const observe = (
+  mode: 'Start' | 'Stop',
+  current: string,
+  stopRequest: StopRequest = STOP_REQUEST.NOT_SENT,
+) => ({ mode, current, stopRequest });
 
 describe('decideResourceAction', () => {
   it.each([
@@ -35,15 +47,26 @@ describe('decideResourceAction', () => {
     { mode: 'Start' as const, current: 'incompatible-restore', expected: 'unexpected' },
     { mode: 'Stop' as const, current: 'incompatible-parameters', expected: 'unexpected' },
   ])('returns $expected for $mode when status is $current', ({ mode, current, expected }) => {
-    expect(decideResourceAction(mode, current)).toBe(expected);
+    expect(decideResourceAction(observe(mode, current))).toBe(expected);
   });
 
   it.each(TRANSITIONING_STATES)('waits while Start sees %s', (current) => {
-    expect(decideResourceAction('Start', current)).toBe('wait');
+    expect(decideResourceAction(observe('Start', current))).toBe('wait');
   });
 
-  it.each(TRANSITIONING_STATES)('waits while Stop sees %s', (current) => {
-    expect(decideResourceAction('Stop', current)).toBe('wait');
+  it.each(TRANSITIONING_STATES.filter((state) => state !== BACKING_UP_STATUS))(
+    'waits while Stop sees %s before a stop is sent',
+    (current) => {
+      expect(decideResourceAction(observe('Stop', current))).toBe('wait');
+    },
+  );
+
+  it('defers a stop that has not been sent while the database is backing up', () => {
+    expect(decideResourceAction(observe('Stop', BACKING_UP_STATUS))).toBe('defer');
+  });
+
+  it('waits after a stop was sent while the database is backing up', () => {
+    expect(decideResourceAction(observe('Stop', BACKING_UP_STATUS, STOP_REQUEST.SENT))).toBe('wait');
   });
 });
 
@@ -137,6 +160,19 @@ describe('nextWaitStep', () => {
       max: 1800,
       expected: { kind: 'pause', command: 'none' },
     },
+    {
+      name: 'defers a stop during backup even when the budget is exhausted',
+      mode: 'Stop' as const,
+      current: BACKING_UP_STATUS,
+      elapsed: 1800,
+      interval: 60,
+      max: 1800,
+      expected: {
+        kind: 'finish',
+        status: 'deferred',
+        reason: 'Stop deferred for DB test-db: status is backing-up. The next stop schedule will try again.',
+      },
+    },
   ])('$name', ({ mode, current, elapsed, interval, max, expected }) => {
     expect(nextWaitStep(waitOptions({
       mode,
@@ -169,12 +205,21 @@ describe('nextWaitStep', () => {
       elapsed: 1800,
       max: 1800,
     },
-  ])('throws a timeout error when $name', ({ mode, current, elapsed, max }) => {
+    {
+      name: 'a stop was already sent and backup continues past the budget',
+      mode: 'Stop' as const,
+      current: BACKING_UP_STATUS,
+      elapsed: 1800,
+      max: 1800,
+      stopRequest: STOP_REQUEST.SENT,
+    },
+  ])('throws a timeout error when $name', ({ mode, current, elapsed, max, stopRequest }) => {
     const act = () => nextWaitStep(waitOptions({
       mode,
       current,
       elapsedWaitSeconds: elapsed,
       maxWaitSeconds: max,
+      ...(stopRequest === undefined ? {} : { stopRequest }),
     }));
 
     expect(act).toThrow(RdsDatabaseRunningSchedulerTimeoutError);
@@ -189,6 +234,27 @@ describe('nextWaitStep', () => {
 
     expect(act).toThrow(RdsDatabaseRunningSchedulerStatusError);
     expect(act).toThrow(`db instance or cluster status fail: type=db identifier=test-db current=${current}`);
+  });
+
+  it('defers a cluster stop during backup', () => {
+    expect(nextWaitStep(waitOptions({
+      mode: 'Stop',
+      current: BACKING_UP_STATUS,
+      type: 'cluster',
+      identifier: 'test-cluster',
+    }))).toEqual({
+      kind: 'finish',
+      status: 'deferred',
+      reason: 'Stop deferred for cluster test-cluster: status is backing-up. The next stop schedule will try again.',
+    });
+  });
+
+  it('waits after a stop was sent while the database is backing up', () => {
+    expect(nextWaitStep(waitOptions({
+      mode: 'Stop',
+      current: BACKING_UP_STATUS,
+      stopRequest: STOP_REQUEST.SENT,
+    }))).toEqual({ kind: 'pause', command: 'none' });
   });
 
   it('reports an unexpected status before the wait budget is checked', () => {

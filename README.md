@@ -21,6 +21,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 - **Optional Slack notifications**: Set `notification.slack.enable` to `SlackNotificationEnable.ENABLED` and provide `secretName` to post schedule progress and per-resource results to Slack via Secrets Manager. Leave `enable` unset (default `SlackNotificationEnable.DISABLED`), set it to `DISABLED`, or omit `notification.slack` to skip secret lookup, Slack API calls, and related IAM grants. When Slack is enabled, a timeout posts a message unless `notification.slack.notifyOnWaitTimeout` is `WaitTimeoutNotification.DISABLED`.
 - **Opt-in failure detection**: Set `failureDetection.enabled` to `true` to create CloudWatch alarms for the Lambda `Errors` and `Throttles` metrics and for the handler's failure logs (wait timeout, unexpected status, failed execution). Pass an existing SNS topic as `failureDetection.alarmTopic` to be notified. Nothing is created by default, and the construct never creates an SNS topic.
 - **Stop skips unsupported configurations**: A stop leaves RDS Custom, Aurora Serverless v1, and Aurora global database clusters that are not the only cluster in that global database running. The execution result and Slack include the reason. A start still runs them.
+- **Backup defers a stop**: A stop that finds `backing-up` before calling stop waits for the next stop schedule instead of timing out. The result and Slack include the reason. A start still waits through `backing-up`.
 - **Supported resources**: RDS DB instances and RDS Aurora clusters.
 
 ## How it works
@@ -29,7 +30,7 @@ EventBridge Scheduler runs a start cron and a stop cron. Each one invokes a dura
 
 The function lists the regions enabled for the account and searches each one with the Resource Groups Tagging API for RDS DB instances and Aurora clusters that match `targetResource`. The Tagging API returns only the resources of the region it is called in, so each region is searched separately. Each `GetResources` call returns at most 100 matches, and the function follows `PaginationToken` until the last page before it deduplicates. When `targetRegions` is set, only those regions are searched. When both a cluster and its member instances match, only the cluster is controlled. Each remaining resource is started or stopped in the region taken from its ARN.
 
-The function then checks that resource every `resourceWait.intervalSeconds` until it is available or stopped, or until `resourceWait.maxSeconds` elapses. A stop also waits through `storage-optimization`. A start that sees `storage-optimization` waits until the status is `stopped`, then starts the database. `configuring-iam-database-auth` and `configuring-log-exports` are waited on the same way. When Slack is enabled, it posts progress and, by default, a message when the wait limit is exceeded.
+The function then checks that resource every `resourceWait.intervalSeconds` until it is available or stopped, or until `resourceWait.maxSeconds` elapses. A stop also waits through `storage-optimization`. A start that sees `storage-optimization` waits until the status is `stopped`, then starts the database. `configuring-iam-database-auth` and `configuring-log-exports` are waited on the same way. A stop that sees `backing-up` before it calls stop does not wait and does not fail. The result status is `deferred`, and the reason says the next stop schedule will try again. When Slack is enabled, that reason is posted in the thread. A start still waits through `backing-up`. After stop has been called, a later `backing-up` status is waited on like any other transition. When Slack is enabled, it posts progress and, by default, a message when the wait limit is exceeded.
 
 Some cases change nothing. When no resource matches, the run ends without posting to Slack. A resource that is already in the target state (available for a start, stopped for a stop) gets no start or stop call, but Slack still receives its result message. A cluster that no longer exists is skipped without a failure and without a result message. Both schedules can also be created in the disabled state with `enableScheduling`.
 
@@ -204,7 +205,7 @@ Slack is optional. Only when `notification.slack.enable` is `SlackNotificationEn
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `intervalSeconds` | `number` | No | Seconds between status checks. Positive integer. Default: `60`. |
-| `maxSeconds` | `number` | No | Maximum accumulated wait seconds for one resource. Positive integer, greater than or equal to `intervalSeconds`, and at most `6900`. Default: `1800`. |
+| `maxSeconds` | `number` | No | Maximum accumulated wait seconds for one resource. Positive integer, greater than or equal to `intervalSeconds`, and at most `6900`. A stop that sees `backing-up` before calling stop does not use this budget. Default: `1800`. |
 
 ## API
 
@@ -235,6 +236,7 @@ When nothing seems to happen, check these in order:
 3. The resources are in a searched region: every enabled region by default, or only `targetRegions` when it is set.
 4. The resource is not a cluster that no longer exists, which is skipped silently.
 5. A stop of RDS Custom, Aurora Serverless v1, or a global database cluster that cannot be stopped is skipped with a reason in the execution result and, when Slack is enabled, in the thread. That skip does not fail the run.
+6. A database still running after the stop schedule may have been deferred because an automatic backup was in progress. The execution result and, when Slack is enabled, the thread say the next stop schedule will try again. That deferral does not fail the run.
 
 When Slack messages are missing, confirm the secret exists, contains `token` and `channel`, and that `notification.slack.enable` is `ENABLED`. A secret that cannot be read fails the run.
 
