@@ -352,7 +352,7 @@ const reportResourceFailure = async (
   }
   const target = parseRdsArn(targetResource);
   await context.step('post-slack-timeout-message', async () => {
-    return client.chat.postMessage({
+    await client.chat.postMessage({
       channel,
       thread_ts: notice.threadTs,
       attachments: [
@@ -611,10 +611,12 @@ const processing = async (
  *
  * When `SLACK_SECRET_NAME` is set (by the CDK construct when `notification.slack.enable`
  * is `ENABLED`), fetches the Slack secret through the AWS Parameters and Secrets Lambda
- * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. When unset or empty,
- * Slack notification steps are skipped. Requires a Lambda runtime with
- * `AWS_SESSION_TOKEN` and the Params and Secrets extension layer (attached by the
- * construct when Slack is enabled).
+ * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. The secret is read
+ * outside a durable step, so the token and channel are not stored in the execution history.
+ * The parent Slack step stores only the message timestamp. Result and timeout posts store
+ * nothing. When the secret name is unset or empty, Slack notification steps are skipped.
+ * Requires a Lambda runtime with `AWS_SESSION_TOKEN` and the Params and Secrets extension
+ * layer (attached by the construct when Slack is enabled).
  *
  * `WAIT_INTERVAL_SECONDS` and `MAX_WAIT_SECONDS` control the per-resource status
  * check. When a resource exceeds the maximum, the handler posts a Slack timeout
@@ -670,9 +672,9 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   let slackClient: WebClient | undefined;
   let slackChannel: string | undefined;
   if (slackSecretName) {
-    const slackSecretValue = await context.step('fetch-slack-secret', async () => {
-      return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
-    });
+    const slackSecretValue = await secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
+    // The name stays so an in-flight replay still matches. The secret read above is not a step result.
+    await context.step('fetch-slack-secret', async () => undefined);
     slackClient = new WebClient(slackSecretValue.token);
     slackChannel = slackSecretValue.channel;
   }
@@ -702,13 +704,13 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   if (slackClient && slackChannel) {
     const client = slackClient;
     const channel = slackChannel;
-    const slackParentMessageResult = await context.step('post-slack-messages', async () => {
-      return client.chat.postMessage({
+    slackParentMessageTs = await context.step('post-slack-messages', async () => {
+      const posted = await client.chat.postMessage({
         channel,
         text: `${params.Mode === RUNNING_MODE_START ? '😆 Starts' : '🥱 Stops'} the scheduled RDS Database or Cluster.`,
       });
+      return posted.ts;
     });
-    slackParentMessageTs = slackParentMessageResult?.ts;
   }
 
   // `continue` waits for every resource. One failure still lets the others
@@ -769,7 +771,7 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
         await childCtx.step('post-slack-child-messages', async () => {
           const display = getStateDisplay(result.status);
 
-          return client.chat.postMessage({
+          await client.chat.postMessage({
             channel,
             thread_ts: slackParentMessageTs,
             attachments: [

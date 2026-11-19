@@ -377,6 +377,11 @@ describe('running-schedule.lambda', () => {
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped' }] })
         .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'available' }] });
       rdsMock.on(StartDBInstanceCommand).resolves({});
+      mockPostMessage.mockResolvedValue({
+        ts: '1234567890.123456',
+        channel: 'C12345678',
+        warning: 'slack-response-body',
+      });
 
       const { run, result } = await runToSuccess('Start');
 
@@ -385,6 +390,11 @@ describe('running-schedule.lambda', () => {
         DBInstanceIdentifier: 'test-db',
       });
       expect(waitsOf(run.execution)).toEqual([{ name: 'wait-db-test-db-0', seconds: 60 }]);
+      const history = JSON.stringify(run.execution.getHistoryEvents());
+      expect(history).toContain('test-db');
+      expect(history).not.toContain('xoxb-test-token');
+      expect(history).not.toContain('C12345678');
+      expect(history).not.toContain('slack-response-body');
     });
 
     it('starts a stopped cluster and returns available', async () => {
