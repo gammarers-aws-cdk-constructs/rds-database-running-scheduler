@@ -51,6 +51,7 @@ import {
   mapItemOutcomes,
   type ObservedMapItemState,
 } from './core/running-schedule-map';
+import { stopSkipReason } from './core/running-schedule-stop-skip';
 import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
@@ -143,6 +144,11 @@ interface ProcessingResult {
   identifier: string;
   /** Resource kind: standalone DB instance or cluster. */
   type: 'db' | 'cluster';
+  /**
+   * Why a stop was skipped.
+   * Absent when the cluster no longer exists, and when a start or stop completes.
+   */
+  reason?: string;
 }
 
 /**
@@ -367,6 +373,94 @@ const reportResourceFailure = async (
 };
 
 /**
+ * Attributes from Describe that the stop-skip decision needs.
+ * The step stores only these fields.
+ */
+interface DescribedResource {
+  /** Current RDS status, or `not-found` when a cluster is gone. */
+  readonly current: string;
+  /** `Engine` from Describe. */
+  readonly engine: string | undefined;
+  /** `EngineMode` from DescribeDBClusters. */
+  readonly engineMode: string | undefined;
+  /** `GlobalClusterIdentifier` when the cluster belongs to a global database. */
+  readonly globalClusterIdentifier: string | undefined;
+  /** `ReadReplicaIdentifiers` of the cluster. Empty for a DB instance. */
+  readonly readReplicaIdentifiers: readonly string[];
+  /** `IsClusterWriter` of each cluster member. Empty for a DB instance. */
+  readonly memberWriters: readonly boolean[];
+}
+
+/**
+ * Describes a resource that has no stop-skip attributes.
+ *
+ * @param current Status to report, including `not-found`.
+ * @returns Attributes that do not select a stop skip.
+ */
+const undescribedResource = (current: string): DescribedResource => ({
+  current,
+  engine: undefined,
+  engineMode: undefined,
+  globalClusterIdentifier: undefined,
+  readReplicaIdentifiers: [],
+  memberWriters: [],
+});
+
+/**
+ * Reads the status and the attributes that decide whether stop would be rejected.
+ *
+ * @param rds Regional RDS client for the resource.
+ * @param type Resource kind from the ARN.
+ * @param identifier DB instance or cluster identifier.
+ * @returns The current status and the stop-skip attributes.
+ * @throws {Error} When a DB instance is not found.
+ */
+const describeTarget = async (
+  rds: RDSClient,
+  type: 'db' | 'cluster',
+  identifier: string,
+): Promise<DescribedResource> => {
+  if (type === 'db') {
+    const res = await rds.send(new DescribeDBInstancesCommand({ DBInstanceIdentifier: identifier }));
+    const instance = res.DBInstances?.[0];
+    const current = instance?.DBInstanceStatus;
+    if (current == null) {
+      throw new Error(`DB instance not found: ${identifier}`);
+    }
+    return {
+      current,
+      engine: instance?.Engine,
+      engineMode: undefined,
+      globalClusterIdentifier: undefined,
+      readReplicaIdentifiers: [],
+      memberWriters: [],
+    };
+  }
+  try {
+    const res = await rds.send(new DescribeDBClustersCommand({ DBClusterIdentifier: identifier }));
+    const cluster = res.DBClusters?.[0];
+    const current = cluster?.Status;
+    if (current == null) {
+      return undescribedResource(RESOURCE_STATUS.NOT_FOUND);
+    }
+    return {
+      current,
+      engine: cluster?.Engine,
+      engineMode: cluster?.EngineMode,
+      globalClusterIdentifier: cluster?.GlobalClusterIdentifier,
+      readReplicaIdentifiers: cluster?.ReadReplicaIdentifiers ?? [],
+      memberWriters: (cluster?.DBClusterMembers ?? []).map((member) => member.IsClusterWriter === true),
+    };
+  } catch (err: unknown) {
+    const code = readErrorName(err);
+    if (code === 'DBClusterNotFoundFault' || code === 'DbClusterNotFoundException') {
+      return undescribedResource(RESOURCE_STATUS.NOT_FOUND);
+    }
+    throw err;
+  }
+};
+
+/**
  * Processes one RDS resource until it reaches a stable state or the wait budget is spent.
  *
  * The function checks status, triggers start/stop when needed, and waits while
@@ -374,7 +468,9 @@ const reportResourceFailure = async (
  * stop, plus `configuring-iam-database-auth` and `configuring-log-exports`.
  * A start that sees `storage-optimization` waits until the status is `stopped`,
  * then starts the resource. Each wait uses `intervalSeconds`. Accumulated
- * waits stop at `maxSeconds`. Uses a region-specific RDS client derived from
+ * waits stop at `maxSeconds`. A stop of RDS Custom, Aurora Serverless v1, or a
+ * global database cluster the stop API rejects returns `skipped` with a reason
+ * and does not call stop. Uses a region-specific RDS client derived from
  * the target ARN so resources outside the Lambda deployment region are handled
  * correctly.
  *
@@ -402,43 +498,44 @@ const processing = async (
   let signal: WaitLoopSignal = 'open';
   let outcome: ProcessingResult | undefined;
 
-  const toResult = (status: string): ProcessingResult => ({
-    resource: targetResource,
-    status,
-    account: target.account,
-    region: target.region,
-    identifier: target.identifier,
-    type: target.type,
-  });
+  const toResult = (status: string, reason?: string): ProcessingResult => {
+    const result: ProcessingResult = {
+      resource: targetResource,
+      status,
+      account: target.account,
+      region: target.region,
+      identifier: target.identifier,
+      type: target.type,
+    };
+    if (reason === undefined) {
+      return result;
+    }
+    return { ...result, reason };
+  };
 
   // Check status at least once. Continue only while the resource still needs a
   // start, stop, or transition wait and the budget covers another interval.
   do {
     const stepName = `describe-${target.type}-${target.identifier}-${iteration}`;
     const statusResult = await context.step(stepName, async () => {
-      if (target.type === 'db') {
-        const res = await rds.send(new DescribeDBInstancesCommand({ DBInstanceIdentifier: target.identifier }));
-        const current = res.DBInstances?.[0]?.DBInstanceStatus;
-        if (current == null) {
-          throw new Error(`DB instance not found: ${target.identifier}`);
-        }
-        return { current, type: target.type, identifier: target.identifier };
-      }
-      try {
-        const res = await rds.send(new DescribeDBClustersCommand({ DBClusterIdentifier: target.identifier }));
-        const current = res.DBClusters?.[0]?.Status;
-        if (current == null) {
-          return { current: RESOURCE_STATUS.NOT_FOUND, type: target.type, identifier: target.identifier };
-        }
-        return { current, type: target.type, identifier: target.identifier };
-      } catch (err: unknown) {
-        const code = readErrorName(err);
-        if (code === 'DBClusterNotFoundFault' || code === 'DbClusterNotFoundException') {
-          return { current: RESOURCE_STATUS.NOT_FOUND, type: target.type, identifier: target.identifier };
-        }
-        throw err;
-      }
+      return describeTarget(rds, target.type, target.identifier);
     });
+
+    if (statusResult.current !== RESOURCE_STATUS.NOT_FOUND) {
+      const reason = stopSkipReason({
+        mode,
+        type: target.type,
+        identifier: target.identifier,
+        engine: statusResult.engine,
+        engineMode: statusResult.engineMode,
+        globalClusterIdentifier: statusResult.globalClusterIdentifier,
+        readReplicaIdentifiers: statusResult.readReplicaIdentifiers,
+        memberWriters: statusResult.memberWriters,
+      });
+      if (reason !== undefined) {
+        return toResult('skipped', reason);
+      }
+    }
 
     const step = nextWaitStep({
       mode,
@@ -619,7 +716,7 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
           });
           throw err;
         }
-        if (result.status === 'skipped') {
+        if (result.status === 'skipped' && result.reason === undefined) {
           return result;
         }
         if (!slackClient || !slackChannel) {
@@ -627,6 +724,31 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
         }
         const client = slackClient;
         const channel = slackChannel;
+        if (result.reason !== undefined) {
+          const reason = result.reason;
+          // A skipped stop is not a failure, so the thread uses a warning color.
+          await childCtx.step('post-slack-child-messages', async () => {
+            await client.chat.postMessage({
+              channel,
+              thread_ts: slackParentMessageTs,
+              attachments: [
+                {
+                  color: '#ecb22e',
+                  pretext: reason,
+                  fields: [
+                    { title: 'Account', value: result.account, short: true },
+                    { title: 'Region', value: result.region, short: true },
+                    { title: 'Type', value: result.type, short: true },
+                    { title: 'Identifier', value: result.identifier, short: true },
+                    { title: 'Status', value: 'SKIPPED', short: true },
+                    { title: 'Reason', value: reason, short: false },
+                  ],
+                },
+              ],
+            });
+          });
+          return result;
+        }
         await childCtx.step('post-slack-child-messages', async () => {
           const display = getStateDisplay(result.status);
 

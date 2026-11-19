@@ -101,6 +101,7 @@ interface ProcessingResult {
   region: string;
   identifier: string;
   type: 'db' | 'cluster';
+  reason?: string;
 }
 
 interface ScheduleResult {
@@ -573,6 +574,210 @@ describe('running-schedule.lambda', () => {
       const { result } = await runToSuccess('Stop');
 
       expect(result.results[0]?.status).toBe('skipped');
+    });
+  });
+
+  describe('unstoppable stop', () => {
+    const stoppedCluster = {
+      Status: 'stopped',
+      Engine: 'aurora-mysql',
+      EngineMode: 'provisioned',
+      DBClusterMembers: [{ IsClusterWriter: true }],
+    };
+
+    it.each([
+      {
+        name: 'RDS Custom',
+        prepare: () => {
+          mockDiscoveredResources([dbArn]);
+          rdsMock.on(DescribeDBInstancesCommand).resolves({
+            DBInstances: [{ DBInstanceStatus: 'available', Engine: 'custom-oracle-ee' }],
+          });
+        },
+        reason: 'Cannot stop DB test-db: RDS Custom does not support stop.',
+        identifier: 'test-db',
+        assertNotStopped: () => {
+          expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+        },
+      },
+      {
+        name: 'Aurora Serverless v1',
+        prepare: () => {
+          mockDiscoveredResources([clusterArn]);
+          rdsMock.on(DescribeDBClustersCommand).resolves({
+            DBClusters: [{
+              Status: 'available',
+              Engine: 'aurora-mysql',
+              EngineMode: 'serverless',
+              DBClusterMembers: [{ IsClusterWriter: true }],
+            }],
+          });
+        },
+        reason: 'Cannot stop cluster test-cluster: Aurora Serverless v1 does not support stop.',
+        identifier: 'test-cluster',
+        assertNotStopped: () => {
+          expect(rdsMock).not.toHaveReceivedCommand(StopDBClusterCommand);
+        },
+      },
+      {
+        name: 'an Aurora global database cluster with a read replica',
+        prepare: () => {
+          mockDiscoveredResources([clusterArn]);
+          rdsMock.on(DescribeDBClustersCommand).resolves({
+            DBClusters: [{
+              Status: 'available',
+              Engine: 'aurora-mysql',
+              EngineMode: 'provisioned',
+              GlobalClusterIdentifier: 'global-1',
+              ReadReplicaIdentifiers: ['arn:aws:rds:us-east-1:123456789012:cluster:secondary'],
+              DBClusterMembers: [{ IsClusterWriter: true }],
+            }],
+          });
+        },
+        reason: 'Cannot stop cluster test-cluster: this Aurora global database cluster does not support stop.',
+        identifier: 'test-cluster',
+        assertNotStopped: () => {
+          expect(rdsMock).not.toHaveReceivedCommand(StopDBClusterCommand);
+        },
+      },
+      {
+        name: 'an Aurora global database cluster without a writer',
+        prepare: () => {
+          mockDiscoveredResources([clusterArn]);
+          rdsMock.on(DescribeDBClustersCommand).resolves({
+            DBClusters: [{
+              Status: 'available',
+              Engine: 'aurora-mysql',
+              EngineMode: 'provisioned',
+              GlobalClusterIdentifier: 'global-1',
+              DBClusterMembers: [{ IsClusterWriter: false }],
+            }],
+          });
+        },
+        reason: 'Cannot stop cluster test-cluster: this Aurora global database cluster does not support stop.',
+        identifier: 'test-cluster',
+        assertNotStopped: () => {
+          expect(rdsMock).not.toHaveReceivedCommand(StopDBClusterCommand);
+        },
+      },
+    ])('skips $name and posts the reason', async ({ prepare, reason, identifier, assertNotStopped }) => {
+      prepare();
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]).toMatchObject({ status: 'skipped', identifier, reason });
+      assertNotStopped();
+      expect(mockPostMessage).toHaveBeenCalledTimes(2);
+      expect(mockPostMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            color: '#ecb22e',
+            pretext: reason,
+            fields: expect.arrayContaining([
+              { title: 'Status', value: 'SKIPPED', short: true },
+              { title: 'Reason', value: reason, short: false },
+            ]),
+          }),
+        ],
+      }));
+    });
+
+    it('still stops another database when one configuration is skipped', async () => {
+      mockDiscoveredResources([dbArn, clusterArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'available', Engine: 'custom-oracle-ee' }],
+      });
+      rdsMock.on(DescribeDBClustersCommand)
+        .resolvesOnce({
+          DBClusters: [{
+            Status: 'available',
+            Engine: 'aurora-mysql',
+            EngineMode: 'provisioned',
+            DBClusterMembers: [{ IsClusterWriter: true }],
+          }],
+        })
+        .resolves({ DBClusters: [stoppedCluster] });
+      rdsMock.on(StopDBClusterCommand).resolves({});
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results.map((entry) => entry.status)).toEqual(['skipped', 'stopped']);
+      expect(result.results[0]?.reason).toBe('Cannot stop DB test-db: RDS Custom does not support stop.');
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+      expect(rdsMock).toHaveReceivedCommandWith(StopDBClusterCommand, { DBClusterIdentifier: 'test-cluster' });
+      expect(mockPostMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('stops Aurora Serverless v2', async () => {
+      mockDiscoveredResources([clusterArn]);
+      rdsMock.on(DescribeDBClustersCommand)
+        .resolvesOnce({
+          DBClusters: [{
+            Status: 'available',
+            Engine: 'aurora-postgresql',
+            EngineMode: 'provisioned',
+            DBClusterMembers: [{ IsClusterWriter: false }, { IsClusterWriter: true }],
+          }],
+        })
+        .resolves({ DBClusters: [stoppedCluster] });
+      rdsMock.on(StopDBClusterCommand).resolves({});
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]?.status).toBe('stopped');
+      expect(result.results[0]?.reason).toBeUndefined();
+      expect(rdsMock).toHaveReceivedCommandTimes(StopDBClusterCommand, 1);
+    });
+
+    it('stops the only cluster in a global database', async () => {
+      mockDiscoveredResources([clusterArn]);
+      rdsMock.on(DescribeDBClustersCommand)
+        .resolvesOnce({
+          DBClusters: [{
+            Status: 'available',
+            Engine: 'aurora-mysql',
+            EngineMode: 'provisioned',
+            GlobalClusterIdentifier: 'global-1',
+            ReadReplicaIdentifiers: [],
+            DBClusterMembers: [{ IsClusterWriter: true }],
+          }],
+        })
+        .resolves({ DBClusters: [stoppedCluster] });
+      rdsMock.on(StopDBClusterCommand).resolves({});
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]?.status).toBe('stopped');
+      expect(rdsMock).toHaveReceivedCommandTimes(StopDBClusterCommand, 1);
+    });
+
+    it('starts RDS Custom', async () => {
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand)
+        .resolvesOnce({ DBInstances: [{ DBInstanceStatus: 'stopped', Engine: 'custom-oracle-ee' }] })
+        .resolves({ DBInstances: [{ DBInstanceStatus: 'available', Engine: 'custom-oracle-ee' }] });
+      rdsMock.on(StartDBInstanceCommand).resolves({});
+
+      const { result } = await runToSuccess('Start');
+
+      expect(result.results[0]?.status).toBe('available');
+      expect(result.results[0]?.reason).toBeUndefined();
+      expect(rdsMock).toHaveReceivedCommandTimes(StartDBInstanceCommand, 1);
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
+    });
+
+    it('records the reason without Slack when Slack is disabled', async () => {
+      mockEnv({ SLACK_SECRET_NAME: '', NOTIFY_SLACK_ON_WAIT_TIMEOUT: false });
+      mockDiscoveredResources([dbArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'available', Engine: 'custom-sqlserver-ee' }],
+      });
+
+      const { result } = await runToSuccess('Stop');
+
+      expect(result.results[0]?.reason).toBe('Cannot stop DB test-db: RDS Custom does not support stop.');
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(rdsMock).not.toHaveReceivedCommand(StopDBInstanceCommand);
     });
   });
 

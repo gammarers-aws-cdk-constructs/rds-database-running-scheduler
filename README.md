@@ -20,6 +20,7 @@ This AWS CDK construct controls the start and stop of RDS DB instances and Auror
 - **Configurable wait**: Set `resourceWait.intervalSeconds` and `resourceWait.maxSeconds` to control how often each resource is checked and how long the function waits before timing out. Defaults are 60 seconds and 1800 seconds.
 - **Optional Slack notifications**: Set `notification.slack.enable` to `SlackNotificationEnable.ENABLED` and provide `secretName` to post schedule progress and per-resource results to Slack via Secrets Manager. Leave `enable` unset (default `SlackNotificationEnable.DISABLED`), set it to `DISABLED`, or omit `notification.slack` to skip secret lookup, Slack API calls, and related IAM grants. When Slack is enabled, a timeout posts a message unless `notification.slack.notifyOnWaitTimeout` is `WaitTimeoutNotification.DISABLED`.
 - **Opt-in failure detection**: Set `failureDetection.enabled` to `true` to create CloudWatch alarms for the Lambda `Errors` and `Throttles` metrics and for the handler's failure logs (wait timeout, unexpected status, failed execution). Pass an existing SNS topic as `failureDetection.alarmTopic` to be notified. Nothing is created by default, and the construct never creates an SNS topic.
+- **Stop skips unsupported configurations**: A stop leaves RDS Custom, Aurora Serverless v1, and Aurora global database clusters that are not the only cluster in that global database running. The execution result and Slack include the reason. A start still runs them.
 - **Supported resources**: RDS DB instances and RDS Aurora clusters.
 
 ## How it works
@@ -31,6 +32,8 @@ The function lists the regions enabled for the account and searches each one wit
 The function then checks that resource every `resourceWait.intervalSeconds` until it is available or stopped, or until `resourceWait.maxSeconds` elapses. A stop also waits through `storage-optimization`. A start that sees `storage-optimization` waits until the status is `stopped`, then starts the database. `configuring-iam-database-auth` and `configuring-log-exports` are waited on the same way. When Slack is enabled, it posts progress and, by default, a message when the wait limit is exceeded.
 
 Some cases change nothing. When no resource matches, the run ends without posting to Slack. A resource that is already in the target state (available for a start, stopped for a stop) gets no start or stop call, but Slack still receives its result message. A cluster that no longer exists is skipped without a failure and without a result message. Both schedules can also be created in the disabled state with `enableScheduling`.
+
+A stop skips a configuration the stop API rejects, and the run does not fail because of that skip. An RDS Custom instance has an engine name that starts with `custom-`. An Aurora Serverless v1 cluster has `EngineMode` `serverless`. An Aurora global database cluster is skipped when `EngineMode` is `global`, or when `GlobalClusterIdentifier` is set and the cluster has read replicas or no writer. The only cluster in a global database, and Aurora Serverless v2 (`EngineMode` `provisioned`), are still stopped. The result status is `skipped` and includes the reason. When Slack is enabled, that reason is posted in the thread. A start still runs these resources.
 
 A resource that does not reach its target state within the wait limit, or reports a status that cannot be handled (for example `incompatible-restore`), is a failed resource. The run still starts or stops every other resource and posts that resource's Slack message before the execution is marked as failed. The execution error names up to 10 failed resources. The log lists every failed resource and its error, separate from the failure-detection markers.
 
@@ -231,6 +234,7 @@ When nothing seems to happen, check these in order:
 2. The resources carry the exact `tagKey` and one of the `tagValues`.
 3. The resources are in a searched region: every enabled region by default, or only `targetRegions` when it is set.
 4. The resource is not a cluster that no longer exists, which is skipped silently.
+5. A stop of RDS Custom, Aurora Serverless v1, or a global database cluster that cannot be stopped is skipped with a reason in the execution result and, when Slack is enabled, in the thread. That skip does not fail the run.
 
 When Slack messages are missing, confirm the secret exists, contains `token` and `channel`, and that `notification.slack.enable` is `ENABLED`. A secret that cannot be read fails the run.
 
