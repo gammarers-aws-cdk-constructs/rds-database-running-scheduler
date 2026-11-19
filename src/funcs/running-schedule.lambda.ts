@@ -105,6 +105,17 @@ const AWS_CLIENT_CONFIG = {
 } as const;
 
 /**
+ * One Slack Web API request.
+ *
+ * The client default has no timeout and retries for about 30 minutes.
+ * Three attempts of 30 seconds, plus the short retry gaps, stay inside one Lambda invocation.
+ */
+const SLACK_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Extra attempts after the first Slack request. */
+const SLACK_RETRIES = 2;
+
+/**
  * Event payload for scheduled start/stop execution.
  */
 interface ScheduleEvent {
@@ -675,7 +686,10 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
     const slackSecretValue = await secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
     // The name stays so an in-flight replay still matches. The secret read above is not a step result.
     await context.step('fetch-slack-secret', async () => undefined);
-    slackClient = new WebClient(slackSecretValue.token);
+    slackClient = new WebClient(slackSecretValue.token, {
+      timeout: SLACK_REQUEST_TIMEOUT_MS,
+      retryConfig: { retries: SLACK_RETRIES },
+    });
     slackChannel = slackSecretValue.channel;
   }
 

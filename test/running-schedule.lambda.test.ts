@@ -20,6 +20,7 @@ import {
   GetResourcesCommand,
   ResourceGroupsTaggingAPIClient,
 } from '@aws-sdk/client-resource-groups-tagging-api';
+import { WebClient } from '@slack/web-api';
 import { secretFetcher } from 'aws-lambda-secret-fetcher';
 import { mockClient } from 'aws-sdk-client-mock';
 import 'aws-sdk-client-mock-jest';
@@ -390,6 +391,10 @@ describe('running-schedule.lambda', () => {
         DBInstanceIdentifier: 'test-db',
       });
       expect(waitsOf(run.execution)).toEqual([{ name: 'wait-db-test-db-0', seconds: 60 }]);
+      expect(WebClient).toHaveBeenCalledWith('xoxb-test-token', {
+        timeout: 30_000,
+        retryConfig: { retries: 2 },
+      });
       const history = JSON.stringify(run.execution.getHistoryEvents());
       expect(history).toContain('test-db');
       expect(history).not.toContain('xoxb-test-token');
