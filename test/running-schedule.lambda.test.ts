@@ -583,7 +583,8 @@ describe('running-schedule.lambda', () => {
 
       const { error } = await runToFailure(createEvent('Start'));
 
-      expect(error.errorMessage).toContain('DB instance not found: test-db');
+      expect(error.errorMessage).toBe('1 resource failed: test-db');
+      expect(loggedMessages()).toContain('DB instance not found: test-db');
     });
 
     it('fails when the DB instance reaches an unknown status', async () => {
@@ -594,7 +595,8 @@ describe('running-schedule.lambda', () => {
 
       const { error } = await runToFailure(createEvent('Start'));
 
-      expect(error.errorMessage).toBe(
+      expect(error.errorMessage).toBe('1 resource failed: test-db');
+      expect(loggedMessages()).toContain(
         'db instance or cluster status fail: type=db identifier=test-db current=incompatible-restore',
       );
     });
@@ -605,7 +607,8 @@ describe('running-schedule.lambda', () => {
 
       const { error } = await runToFailure(createEvent('Stop'));
 
-      expect(error.errorMessage).toContain('network failure');
+      expect(error.errorMessage).toBe('1 resource failed: test-cluster');
+      expect(loggedMessages()).toContain('network failure');
     });
 
     it('processes the other resources before failing when one resource fails', async () => {
@@ -615,8 +618,41 @@ describe('running-schedule.lambda', () => {
       });
       rdsMock.on(DescribeDBClustersCommand).resolves({ DBClusters: [{ Status: 'available' }] });
 
-      await runToFailure(createEvent('Start'));
+      const { run, error } = await runToFailure(createEvent('Start'));
 
+      expect(error.errorMessage).toBe('1 resource failed: test-db');
+      expect(rdsMock).toHaveReceivedCommand(DescribeDBClustersCommand);
+      expect(run.execution.getOperations().map((operation) => operation.getName())).toContain('process-resources');
+      expect(mockPostMessage).toHaveBeenCalledTimes(2);
+      expect(mockPostMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            fields: expect.arrayContaining([
+              { title: 'Identifier', value: 'test-cluster', short: true },
+              { title: 'Status', value: 'AVAILABLE', short: true },
+            ]),
+          }),
+        ],
+      }));
+      const logs = loggedMessages();
+      expect(logs).toContain('resource failures');
+      expect(logs).toContain('test-db');
+      expect(logs).toContain('incompatible-restore');
+    });
+
+    it('names every failed resource after the others finish', async () => {
+      mockDiscoveredResources([dbArn, clusterArn]);
+      rdsMock.on(DescribeDBInstancesCommand).resolves({
+        DBInstances: [{ DBInstanceStatus: 'incompatible-restore' }],
+      });
+      rdsMock.on(DescribeDBClustersCommand).resolves({
+        DBClusters: [{ Status: 'incompatible-parameters' }],
+      });
+
+      const { error } = await runToFailure(createEvent('Start'));
+
+      expect(error.errorMessage).toBe('2 resources failed: test-db, test-cluster');
+      expect(rdsMock).toHaveReceivedCommand(DescribeDBInstancesCommand);
       expect(rdsMock).toHaveReceivedCommand(DescribeDBClustersCommand);
     });
   });
@@ -699,7 +735,7 @@ describe('running-schedule.lambda', () => {
 
       const { run, error } = await runToFailure(createEvent('Start'));
 
-      expect(error.errorMessage).toBe('wait timed out: type=db identifier=test-db maxWaitSeconds=120');
+      expect(error.errorMessage).toBe('1 resource failed: test-db');
       expect(waitsOf(run.execution)).toEqual([
         { name: 'wait-db-test-db-0', seconds: 60 },
         { name: 'wait-db-test-db-1', seconds: 60 },
@@ -714,7 +750,7 @@ describe('running-schedule.lambda', () => {
 
       const { error } = await runToFailure(createEvent('Start'));
 
-      expect(error.errorMessage).toBe('wait timed out: type=db identifier=test-db maxWaitSeconds=60');
+      expect(error.errorMessage).toBe('1 resource failed: test-db');
       expect(mockPostMessage).toHaveBeenCalledTimes(2);
       expect(mockPostMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
         channel: 'C12345678',
@@ -740,7 +776,7 @@ describe('running-schedule.lambda', () => {
 
       const { error } = await runToFailure(createEvent('Stop'));
 
-      expect(error.errorMessage).toBe('wait timed out: type=cluster identifier=test-cluster maxWaitSeconds=60');
+      expect(error.errorMessage).toBe('1 resource failed: test-cluster');
       expect(mockPostMessage).toHaveBeenCalledTimes(1);
     });
 
@@ -773,7 +809,7 @@ describe('running-schedule.lambda', () => {
 
       const { error } = await runToFailure(createEvent('Start'));
 
-      expect(error.errorMessage).toBe('wait timed out: type=db identifier=test-db maxWaitSeconds=60');
+      expect(error.errorMessage).toBe('1 resource failed: test-db');
       expect(secretFetcher.getSecretValue).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
     });

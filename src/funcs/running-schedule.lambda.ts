@@ -1,4 +1,5 @@
 import {
+  BatchItemStatus,
   type DurableContext,
   withDurableExecution,
 } from '@aws/durable-execution-sdk-js';
@@ -43,6 +44,14 @@ import {
   RdsDatabaseRunningSchedulerValidateError,
 } from './core/running-schedule-errors';
 import {
+  hasMapFailure,
+  MAP_COMPLETION,
+  mapCompletionConfig,
+  mapFailureMessage,
+  mapItemOutcomes,
+  type ObservedMapItemState,
+} from './core/running-schedule-map';
+import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
   parseRdsArn,
@@ -68,6 +77,16 @@ const STATE_LIST = [
  * Most resources processed at the same time in one run.
  */
 const MAX_CONCURRENT_RESOURCES = 10;
+
+/**
+ * Batch status recorded for each map item.
+ * `STARTED` is an item the batch abandoned while it was still running.
+ */
+const MAP_ITEM_STATE: Record<BatchItemStatus, ObservedMapItemState> = {
+  [BatchItemStatus.FAILED]: 'failed',
+  [BatchItemStatus.STARTED]: 'started',
+  [BatchItemStatus.SUCCEEDED]: 'succeeded',
+};
 
 /**
  * Shared HTTP settings for every AWS SDK client in this handler.
@@ -495,9 +514,10 @@ const processing = async (
  * message only when Slack is configured and `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is true,
  * and logs the failure with a marker for the failure-detection alarms.
  *
- * A failed resource does not stop the others. After every resource was attempted,
- * the first failure is rethrown so the execution fails. The durable SDK wraps that
- * error (for example in a `ChildContextError`) and keeps its message.
+ * A failed resource does not stop the others. The map runs every resource, including
+ * Slack notices for the ones that finish. After that, a failure of any resource fails
+ * the execution. The error names up to 10 failed resources. The log lists every failed
+ * resource and its error message.
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
@@ -507,9 +527,9 @@ const processing = async (
  * settings are not positive integers within the allowed maximum, when
  * `TARGET_REGIONS` is not a JSON array of distinct region names, or when it names
  * a region that is not enabled for the account.
- * @throws {Error} When a resource times out ({@link RdsDatabaseRunningSchedulerTimeoutError}),
- * reaches an unexpected status ({@link RdsDatabaseRunningSchedulerStatusError}), or fails
- * for another reason, such as a missing DB instance.
+ * @throws {Error} When any resource times out, reaches an unexpected status, or fails
+ * for another reason, such as a missing DB instance. The message names the failed
+ * resources. The per-resource error is written to the log before this throw.
  * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
  */
 const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
@@ -578,7 +598,11 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
     slackParentMessageTs = slackParentMessageResult?.ts;
   }
 
+  // `continue` waits for every resource. One failure still lets the others
+  // start or stop, and post Slack, before the execution itself fails.
+  const completionConfig = mapCompletionConfig(MAP_COMPLETION.CONTINUE);
   const results = await context.map(
+    'process-resources',
     targetResources,
     async (ctx: DurableContext, targetResource: string, index: number) => {
       return ctx.runInChildContext(`resource-${index}`, async (childCtx: DurableContext) => {
@@ -628,12 +652,28 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
         return result;
       });
     },
-    { maxConcurrency: MAX_CONCURRENT_RESOURCES },
+    {
+      maxConcurrency: MAX_CONCURRENT_RESOURCES,
+      completionConfig,
+    },
   );
 
-  // `context.map` records each failed resource instead of throwing, so rethrow
-  // the first failure to fail the execution after every resource was attempted.
-  results.throwIfError();
+  const outcomes = mapItemOutcomes(
+    targetResources.map((arn) => parseRdsArn(arn).identifier),
+    results.all.map((item) => ({
+      index: item.index,
+      state: MAP_ITEM_STATE[item.status],
+    })),
+  );
+  if (hasMapFailure(outcomes)) {
+    context.logger.error('resource failures', {
+      resources: results.failed().map((item) => ({
+        name: parseRdsArn(targetResources[item.index]).identifier,
+        message: item.error.message,
+      })),
+    });
+    throw new Error(mapFailureMessage(outcomes));
+  }
 
   return { processed: results.totalCount, results: results.getResults() };
 };
