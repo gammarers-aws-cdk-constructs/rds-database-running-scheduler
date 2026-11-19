@@ -1,9 +1,17 @@
 import { Aws, Duration, RemovalPolicy, TimeZone } from 'aws-cdk-lib';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as logs from 'aws-cdk-lib/aws-logs';
-import * as scheduler from 'aws-cdk-lib/aws-scheduler';
-import * as targets from 'aws-cdk-lib/aws-scheduler-targets';
+import { Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  ApplicationLogLevel,
+  Architecture,
+  LoggingFormat,
+  ParamsAndSecretsLayerVersion,
+  ParamsAndSecretsLogLevel,
+  ParamsAndSecretsVersions,
+  SystemLogLevel,
+} from 'aws-cdk-lib/aws-lambda';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Schedule as SchedulerSchedule, ScheduleExpression, ScheduleTargetInput } from 'aws-cdk-lib/aws-scheduler';
+import { LambdaInvoke } from 'aws-cdk-lib/aws-scheduler-targets';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import {
@@ -422,8 +430,8 @@ export class RDSDatabaseRunningScheduler extends Construct {
       notifySlackOnWaitTimeout = slackNotification.notifyOnWaitTimeout;
     }
 
-    const logGroup = new logs.LogGroup(this, 'RunningScheduleFunctionLogGroup', {
-      retention: logs.RetentionDays.THREE_MONTHS,
+    const logGroup = new LogGroup(this, 'RunningScheduleFunctionLogGroup', {
+      retention: RetentionDays.THREE_MONTHS,
       // Keep the logs after creation succeeds so failures stay investigable after a stack deletion or replacement.
       removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
     });
@@ -431,7 +439,7 @@ export class RDSDatabaseRunningScheduler extends Construct {
     // 👇 Lambda Function
     const runningScheduleFunction = new RunningScheduleFunction(this, 'RunningScheduleFunction', {
       description: 'A function to run the scheduled RDS Database or Cluster.',
-      architecture: lambda.Architecture.ARM_64,
+      architecture: Architecture.ARM_64,
       timeout: Duration.minutes(15),
       memorySize: 512,
       retryAttempts: 2,
@@ -450,55 +458,55 @@ export class RDSDatabaseRunningScheduler extends Construct {
       },
       ...(slackNotification.state === SlackNotificationEnable.ENABLED
         ? {
-          paramsAndSecrets: lambda.ParamsAndSecretsLayerVersion.fromVersion(lambda.ParamsAndSecretsVersions.V1_0_103, {
+          paramsAndSecrets: ParamsAndSecretsLayerVersion.fromVersion(ParamsAndSecretsVersions.V1_0_103, {
             cacheSize: 500,
-            logLevel: lambda.ParamsAndSecretsLogLevel.INFO,
+            logLevel: ParamsAndSecretsLogLevel.INFO,
           }),
         }
         : {}),
-      role: new iam.Role(this, 'RunningScheduleFunctionRole', {
+      role: new Role(this, 'RunningScheduleFunctionRole', {
         description: 'A role to control the RDS Database or Cluster.',
-        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
         managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicDurableExecutionRolePolicy'),
+          ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+          ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicDurableExecutionRolePolicy'),
         ],
       }),
       logGroup,
-      loggingFormat: lambda.LoggingFormat.JSON,
-      systemLogLevelV2: lambda.SystemLogLevel.INFO,
-      applicationLogLevelV2: lambda.ApplicationLogLevel.INFO,
+      loggingFormat: LoggingFormat.JSON,
+      systemLogLevelV2: SystemLogLevel.INFO,
+      applicationLogLevelV2: ApplicationLogLevel.INFO,
     });
-    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+    runningScheduleFunction.addToRolePolicy(new PolicyStatement({
       sid: 'GetResources',
-      effect: iam.Effect.ALLOW,
+      effect: Effect.ALLOW,
       actions: [
         'tag:GetResources',
       ],
       resources: ['*'],
     }));
     // DescribeRegions does not support resource-level IAM. It lists the regions to search.
-    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+    runningScheduleFunction.addToRolePolicy(new PolicyStatement({
       sid: 'DescribeRegions',
-      effect: iam.Effect.ALLOW,
+      effect: Effect.ALLOW,
       actions: [
         'ec2:DescribeRegions',
       ],
       resources: ['*'],
     }));
     // DescribeDBInstances and DescribeDBClusters do not support resource-level IAM.
-    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+    runningScheduleFunction.addToRolePolicy(new PolicyStatement({
       sid: 'RdsDescribe',
-      effect: iam.Effect.ALLOW,
+      effect: Effect.ALLOW,
       actions: [
         'rds:DescribeDBInstances',
         'rds:DescribeDBClusters',
       ],
       resources: ['*'],
     }));
-    runningScheduleFunction.addToRolePolicy(new iam.PolicyStatement({
+    runningScheduleFunction.addToRolePolicy(new PolicyStatement({
       sid: 'RdsRunningControl',
-      effect: iam.Effect.ALLOW,
+      effect: Effect.ALLOW,
       actions: [
         'rds:StartDBInstance',
         'rds:StartDBCluster',
@@ -529,19 +537,19 @@ export class RDSDatabaseRunningScheduler extends Construct {
 
     // Each schedule invokes the durable Lambda, which discovers tagged resources,
     // starts or stops them, and waits for a stable state.
-    new scheduler.Schedule(this, 'RunningStartSchedule', {
+    new SchedulerSchedule(this, 'RunningStartSchedule', {
       description: 'running start schedule',
       enabled: scheduleEnabled,
-      schedule: scheduler.ScheduleExpression.cron({
+      schedule: ScheduleExpression.cron({
         minute: props.startSchedule?.minute ?? '50',
         hour: props.startSchedule?.hour ?? '7',
         weekDay: props.startSchedule?.week ?? DEFAULT_SCHEDULE_WEEK_DAY,
         timeZone: props.startSchedule?.timezone ?? TimeZone.ETC_UTC,
       }),
-      target: new targets.LambdaInvoke(runningScheduleFunctionAlias, {
+      target: new LambdaInvoke(runningScheduleFunctionAlias, {
         retryAttempts: SCHEDULE_RETRY_ATTEMPTS,
         maxEventAge: SCHEDULE_MAX_EVENT_AGE,
-        input: scheduler.ScheduleTargetInput.fromObject({
+        input: ScheduleTargetInput.fromObject({
           Params: {
             TagKey: props.targetResource.tagKey,
             TagValues: props.targetResource.tagValues,
@@ -551,19 +559,19 @@ export class RDSDatabaseRunningScheduler extends Construct {
       }),
     });
 
-    new scheduler.Schedule(this, 'RunningStopSchedule', {
+    new SchedulerSchedule(this, 'RunningStopSchedule', {
       description: 'running stop schedule',
       enabled: scheduleEnabled,
-      schedule: scheduler.ScheduleExpression.cron({
+      schedule: ScheduleExpression.cron({
         minute: props.stopSchedule?.minute ?? '5',
         hour: props.stopSchedule?.hour ?? '19',
         weekDay: props.stopSchedule?.week ?? DEFAULT_SCHEDULE_WEEK_DAY,
         timeZone: props.stopSchedule?.timezone ?? TimeZone.ETC_UTC,
       }),
-      target: new targets.LambdaInvoke(runningScheduleFunctionAlias, {
+      target: new LambdaInvoke(runningScheduleFunctionAlias, {
         retryAttempts: SCHEDULE_RETRY_ATTEMPTS,
         maxEventAge: SCHEDULE_MAX_EVENT_AGE,
-        input: scheduler.ScheduleTargetInput.fromObject({
+        input: ScheduleTargetInput.fromObject({
           Params: {
             TagKey: props.targetResource.tagKey,
             TagValues: props.targetResource.tagValues,
