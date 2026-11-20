@@ -1,5 +1,4 @@
 import { ProjenCdkConstructLibrary } from '@gammarers/projen-projects';
-import { awscdk } from 'projen';
 const project = new ProjenCdkConstructLibrary({
   cdkVersion: '2.232.0',
   name: 'rds-database-running-scheduler',
@@ -19,7 +18,7 @@ const project = new ProjenCdkConstructLibrary({
     'lambda-failure-detector@^0.2.1',
   ],
   devDeps: [
-    '@gammarers/projen-projects@^0.5.1',
+    '@gammarers/projen-projects@^0.8.1',
     '@aws/durable-execution-sdk-js@^2.7.1',
     '@aws/durable-execution-sdk-js-testing@^1.3.2',
     '@aws-sdk/client-cost-explorer@^3.1087.0',
@@ -36,22 +35,5 @@ const project = new ProjenCdkConstructLibrary({
   ],
   releaseToNpm: true,
   npmTrustedPublishing: true,
-  jestOptions: {
-    extraCliOptions: ['--silent'],
-  },
-  tsconfigDev: {
-    compilerOptions: {
-      strict: true,
-    },
-  },
-  lambdaOptions: {
-    // target node.js runtime
-    runtime: awscdk.LambdaRuntime.NODEJS_24_X,
-    bundlingOptions: {
-      // list of node modules to exclude from the bundle
-      externals: ['@aws-sdk/*'],
-      sourcemap: true,
-    },
-  },
 });
 project.synth();
