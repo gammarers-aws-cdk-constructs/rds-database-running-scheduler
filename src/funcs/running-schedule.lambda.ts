@@ -147,7 +147,7 @@ interface SlackSecret {
 interface ProcessingResult {
   /** Full ARN of the processed RDS resource. */
   resource: string;
-  /** Final RDS status, or `skipped` when the resource was not found. */
+  /** Final status: an RDS status, `skipped`, or `deferred`. */
   status: string;
   /** AWS account ID of the resource. */
   account: string;
@@ -158,7 +158,7 @@ interface ProcessingResult {
   /** Resource kind: standalone DB instance or cluster. */
   type: 'db' | 'cluster';
   /**
-   * Why a stop was skipped.
+   * Why a stop was skipped or deferred.
    * Absent when the cluster no longer exists, and when a start or stop completes.
    */
   reason?: string;
