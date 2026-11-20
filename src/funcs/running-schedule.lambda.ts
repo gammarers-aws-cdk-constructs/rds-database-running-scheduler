@@ -620,8 +620,9 @@ const processing = async (
  *
  * When `SLACK_SECRET_NAME` is set (by the CDK construct when `notification.slack.enable`
  * is `ENABLED`), fetches the Slack secret through the AWS Parameters and Secrets Lambda
- * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. The secret is read
- * outside a durable step, so the token and channel are not stored in the execution history.
+ * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. A binary secret
+ * fails the run. The secret is read outside a durable step, so the token and channel
+ * are not stored in the execution history.
  * The parent Slack step stores only the message timestamp. Result and timeout posts store
  * nothing. When the secret name is unset or empty, Slack notification steps are skipped.
  * Requires a Lambda runtime with `AWS_SESSION_TOKEN` and the Params and Secrets extension
@@ -654,7 +655,8 @@ const processing = async (
  * @throws {Error} When any resource times out, reaches an unexpected status, or fails
  * for another reason, such as a missing DB instance. The message names the failed
  * resources. The per-resource error is written to the log before this throw.
- * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
+ * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank,
+ * secret fetch fails, or the Slack secret is binary.
  */
 const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   const params = event.Params;

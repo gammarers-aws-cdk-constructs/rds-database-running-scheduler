@@ -1201,4 +1201,16 @@ describe('secret read failure', () => {
 
     expect(loggedMessages()).toContain(`${LOG_MARKER_SCHEDULE_EXECUTION_FAILED}: secret-down`);
   });
+
+  it('fails when the Slack secret is binary', async () => {
+    (secretFetcher.getSecretValue as jest.Mock).mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+
+    const { error } = await runToFailure(createEvent('Start'));
+
+    expect(error.errorMessage).toContain('Slack secret example/slack/webhook is binary');
+    expect(loggedMessages()).toContain(
+      `${LOG_MARKER_SCHEDULE_EXECUTION_FAILED}: Slack secret example/slack/webhook is binary`,
+    );
+    expect(WebClient).not.toHaveBeenCalled();
+  });
 });
