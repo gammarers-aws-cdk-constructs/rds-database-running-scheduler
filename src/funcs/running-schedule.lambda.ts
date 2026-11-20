@@ -317,6 +317,20 @@ const readErrorMessage = (err: unknown): string => {
 };
 
 /**
+ * Whether a wait-timeout Slack notice is posted.
+ * A boolean is not used, so the two cases stay explicit.
+ */
+const WAIT_TIMEOUT_NOTICE = {
+  /** Post the timeout notice. */
+  ENABLED: 'enabled',
+  /** Leave the timeout unposted. */
+  DISABLED: 'disabled',
+} as const;
+
+/** Whether a wait-timeout Slack notice is posted. */
+type WaitTimeoutNoticeState = typeof WAIT_TIMEOUT_NOTICE[keyof typeof WAIT_TIMEOUT_NOTICE];
+
+/**
  * Slack settings for the wait-timeout notice of one resource.
  */
 interface WaitTimeoutNotice {
@@ -326,8 +340,8 @@ interface WaitTimeoutNotice {
   channel: string | undefined;
   /** Parent message timestamp the notice replies to. */
   threadTs: string | undefined;
-  /** Whether `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is on. */
-  enabled: boolean;
+  /** Whether `NOTIFY_SLACK_ON_WAIT_TIMEOUT` asks for a timeout notice. */
+  state: WaitTimeoutNoticeState;
   /** Maximum wait seconds reported in the notice. */
   maxSeconds: number;
 }
@@ -358,7 +372,7 @@ const reportResourceFailure = async (
   }
   context.logger.error(`${LOG_MARKER_RESOURCE_WAIT_TIMED_OUT}: ${err.message}`);
   const { client, channel } = notice;
-  if (!client || !channel || !notice.enabled) {
+  if (!client || !channel || notice.state === WAIT_TIMEOUT_NOTICE.DISABLED) {
     return;
   }
   const target = parseRdsArn(targetResource);
@@ -674,7 +688,9 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
     'NOTIFY_SLACK_ON_WAIT_TIMEOUT',
     StrictEnvType.Boolean,
     { default: false },
-  );
+  )
+    ? WAIT_TIMEOUT_NOTICE.ENABLED
+    : WAIT_TIMEOUT_NOTICE.DISABLED;
   const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
   const requestedRegions = parseTargetRegions(
     StrictEnvResolver.resolve('TARGET_REGIONS', StrictEnvType.String, { default: '[]' }),
@@ -743,7 +759,7 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
             client: slackClient,
             channel: slackChannel,
             threadTs: slackParentMessageTs,
-            enabled: notifySlackOnWaitTimeout,
+            state: notifySlackOnWaitTimeout,
             maxSeconds: resourceWait.maxSeconds,
           });
           throw err;
