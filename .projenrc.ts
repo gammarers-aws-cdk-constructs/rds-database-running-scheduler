@@ -19,7 +19,7 @@ const project = new ProjenCdkConstructLibrary({
   ],
   devDeps: [
     '@gammarers/projen-projects@^0.8.1',
-    '@aws/durable-execution-sdk-js@^2.7.1',
+    '@aws/durable-execution-sdk-js@^3.1.0',
     '@aws/durable-execution-sdk-js-testing@^1.3.2',
     '@aws-sdk/client-cost-explorer@^3.1087.0',
     '@aws-sdk/client-ec2@^3.1087.0',
