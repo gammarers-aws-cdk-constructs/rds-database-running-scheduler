@@ -36,7 +36,7 @@ Some cases change nothing. When no resource matches, the run ends without postin
 
 A stop skips a configuration the stop API rejects, and the run does not fail because of that skip. An RDS Custom instance has an engine name that starts with `custom-`. An Aurora Serverless v1 cluster has `EngineMode` `serverless`. An Aurora global database cluster is skipped when `EngineMode` is `global`, or when `GlobalClusterIdentifier` is set and the cluster has read replicas or no writer. The only cluster in a global database, and Aurora Serverless v2 (`EngineMode` `provisioned`), are still stopped. The result status is `skipped` and includes the reason. When Slack is enabled, that reason is posted in the thread. A start still runs these resources.
 
-A resource that does not reach its target state within the wait limit, or reports a status that cannot be handled (for example `incompatible-restore`), is a failed resource. The run still starts or stops every other resource and posts that resource's Slack message before the execution is marked as failed. The execution error names up to 10 failed resources. The log lists every failed resource and its error, separate from the failure-detection markers.
+A resource that does not reach its target state within the wait limit, reports a status that cannot be handled (for example `incompatible-restore`), or is a DB instance that no longer exists, is a failed resource. The run still starts or stops every other resource and posts that resource's Slack message before the execution is marked as failed. The execution error names up to 10 failed resources. The log lists every failed resource and its error, separate from the failure-detection markers.
 
 The Lambda log group keeps logs for three months. It is deleted only when its creation fails, and it is retained when the stack is deleted or the resource is replaced, so failures stay investigable.
 
@@ -234,7 +234,7 @@ When nothing seems to happen, check these in order:
 1. The schedules were not created with `enableScheduling: SchedulingEnable.DISABLED`.
 2. The resources carry the exact `tagKey` and one of the `tagValues`.
 3. The resources are in a searched region: every enabled region by default, or only `targetRegions` when it is set.
-4. The resource is not a cluster that no longer exists, which is skipped silently.
+4. The resource is not a cluster that no longer exists, which is skipped silently. A DB instance that no longer exists fails that resource instead.
 5. A stop of RDS Custom, Aurora Serverless v1, or a global database cluster that cannot be stopped is skipped with a reason in the execution result and, when Slack is enabled, in the thread. That skip does not fail the run.
 6. A database still running after the stop schedule may have been deferred because an automatic backup was in progress. The execution result and, when Slack is enabled, the thread say the next stop schedule will try again. That deferral does not fail the run.
 

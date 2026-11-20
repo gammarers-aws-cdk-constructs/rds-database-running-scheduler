@@ -18,7 +18,12 @@ export abstract class RdsDatabaseRunningSchedulerError extends Error {
 }
 
 /**
- * Wait settings read by the handler are not positive integers within the limit.
+ * Input the handler refuses before it changes a resource.
+ *
+ * Thrown when the schedule event is missing `Params`, when a region is blank,
+ * when wait settings are not positive integers within the limit, or when
+ * `TARGET_REGIONS` is not a JSON array of distinct region names that are
+ * enabled for the account.
  */
 export class RdsDatabaseRunningSchedulerValidateError extends RdsDatabaseRunningSchedulerError {
   override readonly name: string = 'RdsDatabaseRunningSchedulerValidateError';
