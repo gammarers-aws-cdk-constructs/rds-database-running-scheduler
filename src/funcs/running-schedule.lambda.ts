@@ -686,6 +686,10 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   let slackChannel: string | undefined;
   if (slackSecretName) {
     const slackSecretValue = await secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
+    // A binary secret has no token or channel. Fail before a durable step can record it.
+    if (slackSecretValue instanceof Uint8Array) {
+      throw new Error(`Slack secret ${slackSecretName} is binary`);
+    }
     // The name stays so an in-flight replay still matches. The secret read above is not a step result.
     await context.step('fetch-slack-secret', async () => undefined);
     slackClient = new WebClient(slackSecretValue.token, {

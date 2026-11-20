@@ -90,7 +90,7 @@ exports[`custom start/stop schedule Should match snapshot 1`] = `
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "5875248294620c010160b8b67c0445a4afceb71c761fc57e083f1cf95d602413.zip",
+          "S3Key": "c4bb6cc897236af79fce6f7f4454965f82cdf655736ee07aadb52895bfb7b175.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -155,7 +155,7 @@ exports[`custom start/stop schedule Should match snapshot 1`] = `
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c6e910b1499857e582d8504ef078d6d",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c95aed55fc8d770284136073ca71d7d",
             "Version",
           ],
         },
@@ -163,7 +163,7 @@ exports[`custom start/stop schedule Should match snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c6e910b1499857e582d8504ef078d6d": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c95aed55fc8d770284136073ca71d7d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -595,7 +595,7 @@ exports[`default schedule with Slack Should match snapshot 1`] = `
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "5875248294620c010160b8b67c0445a4afceb71c761fc57e083f1cf95d602413.zip",
+          "S3Key": "c4bb6cc897236af79fce6f7f4454965f82cdf655736ee07aadb52895bfb7b175.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -660,7 +660,7 @@ exports[`default schedule with Slack Should match snapshot 1`] = `
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c6e910b1499857e582d8504ef078d6d",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c95aed55fc8d770284136073ca71d7d",
             "Version",
           ],
         },
@@ -668,7 +668,7 @@ exports[`default schedule with Slack Should match snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c6e910b1499857e582d8504ef078d6d": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c95aed55fc8d770284136073ca71d7d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1100,7 +1100,7 @@ exports[`disabled scheduling Should match snapshot 1`] = `
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "5875248294620c010160b8b67c0445a4afceb71c761fc57e083f1cf95d602413.zip",
+          "S3Key": "c4bb6cc897236af79fce6f7f4454965f82cdf655736ee07aadb52895bfb7b175.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1165,7 +1165,7 @@ exports[`disabled scheduling Should match snapshot 1`] = `
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c6e910b1499857e582d8504ef078d6d",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c95aed55fc8d770284136073ca71d7d",
             "Version",
           ],
         },
@@ -1173,7 +1173,7 @@ exports[`disabled scheduling Should match snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c6e910b1499857e582d8504ef078d6d": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9612c95aed55fc8d770284136073ca71d7d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1538,7 +1538,7 @@ exports[`slack.enable false with secretName Should match snapshot 1`] = `
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "5875248294620c010160b8b67c0445a4afceb71c761fc57e083f1cf95d602413.zip",
+          "S3Key": "c4bb6cc897236af79fce6f7f4454965f82cdf655736ee07aadb52895bfb7b175.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1582,7 +1582,7 @@ exports[`slack.enable false with secretName Should match snapshot 1`] = `
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961520dd222ab5d1292e51c2abde6925ea4",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9614740e299c1535f7fb6485b63f472df9d",
             "Version",
           ],
         },
@@ -1590,7 +1590,7 @@ exports[`slack.enable false with secretName Should match snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961520dd222ab5d1292e51c2abde6925ea4": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9614740e299c1535f7fb6485b63f472df9d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
@@ -1928,7 +1928,7 @@ exports[`without Slack notification Should match snapshot 1`] = `
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "5875248294620c010160b8b67c0445a4afceb71c761fc57e083f1cf95d602413.zip",
+          "S3Key": "c4bb6cc897236af79fce6f7f4454965f82cdf655736ee07aadb52895bfb7b175.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -1972,7 +1972,7 @@ exports[`without Slack notification Should match snapshot 1`] = `
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961520dd222ab5d1292e51c2abde6925ea4",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9614740e299c1535f7fb6485b63f472df9d",
             "Version",
           ],
         },
@@ -1980,7 +1980,7 @@ exports[`without Slack notification Should match snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F961520dd222ab5d1292e51c2abde6925ea4": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9614740e299c1535f7fb6485b63f472df9d": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },
