@@ -62,10 +62,8 @@ import {
   RESOURCE_STATUS,
   resolveResourceWait,
   STOP_REQUEST,
-  shouldContinueWaitLoop,
   type ResolvedResourceWait,
   type StopRequest,
-  type WaitLoopSignal,
 } from './core/running-schedule-wait';
 
 /**
@@ -291,16 +289,10 @@ const getStateDisplay = (current: string): { emoji: string; name: string } | und
  * @returns The error name when it is a string, otherwise an empty string.
  */
 const readErrorName = (err: unknown): string => {
-  if (typeof err !== 'object' || err === null) {
-    return '';
+  if (typeof err === 'object' && err !== null && 'name' in err && typeof err.name === 'string') {
+    return err.name;
   }
-  if (!('name' in err)) {
-    return '';
-  }
-  if (typeof err.name !== 'string') {
-    return '';
-  }
-  return err.name;
+  return '';
 };
 
 /**
@@ -523,8 +515,6 @@ const processing = async (
   const { intervalSeconds, maxSeconds } = waitSettings;
   let iteration = 0;
   let elapsedWaitSeconds = 0;
-  let signal: WaitLoopSignal = 'open';
-  let outcome: ProcessingResult | undefined;
   let stopRequest: StopRequest = STOP_REQUEST.NOT_SENT;
 
   const toResult = (status: string, reason?: string): ProcessingResult => {
@@ -579,8 +569,7 @@ const processing = async (
     });
 
     if (step.kind === 'finish') {
-      signal = 'settled';
-      outcome = toResult(step.status, step.reason);
+      return toResult(step.status, step.reason);
     }
     // Step and wait names carry the iteration so each attempt stays unique across replays.
     if (step.kind === 'pause' && step.command === 'start' && target.type === 'db') {
@@ -612,12 +601,7 @@ const processing = async (
     }
 
     iteration += 1;
-  } while (shouldContinueWaitLoop(signal));
-
-  if (outcome === undefined) {
-    throw new Error(`wait loop ended without a result: type=${target.type} identifier=${target.identifier}`);
-  }
-  return outcome;
+  } while (true);
 };
 
 /**

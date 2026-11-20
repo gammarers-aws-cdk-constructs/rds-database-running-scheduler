@@ -237,7 +237,7 @@ exports[`enabled with an alarm topic Should match snapshot 1`] = `
           "S3Bucket": {
             "Fn::Sub": "cdk-hnb659fds-assets-\${AWS::AccountId}-\${AWS::Region}",
           },
-          "S3Key": "f7f315086e3b98d0370f784e65bb446b5e227ba6066621cb68b9b9cf2f22f93e.zip",
+          "S3Key": "74aeba4a5082a0ce70b4e5e30d160b866788b17549e1d07f19986a4889043923.zip",
         },
         "Description": "A function to run the scheduled RDS Database or Cluster.",
         "DurableConfig": {
@@ -302,7 +302,7 @@ exports[`enabled with an alarm topic Should match snapshot 1`] = `
         },
         "FunctionVersion": {
           "Fn::GetAtt": [
-            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F96123acdfc34fb7cc77bc0994e2e7c7f65c",
+            "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9613a7bacbca3b17a753ebac278daef8c67",
             "Version",
           ],
         },
@@ -310,7 +310,7 @@ exports[`enabled with an alarm topic Should match snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Alias",
     },
-    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F96123acdfc34fb7cc77bc0994e2e7c7f65c": {
+    "RDSDatabaseRunningSchedulerRunningScheduleFunctionCurrentVersion1310F9613a7bacbca3b17a753ebac278daef8c67": {
       "Metadata": {
         "aws:cdk:do-not-refactor": true,
       },

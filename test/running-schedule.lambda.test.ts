@@ -1165,3 +1165,40 @@ describe('wait timeout without Slack', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 });
+
+describe('malformed discovery', () => {
+  it('fails when a discovered DB ARN has no region', async () => {
+    mockDiscoveredResources(['arn:aws:rds:::db:test-db']);
+
+    const { error } = await runToFailure(createEvent('Start'));
+
+    expect(error.errorMessage).toBe('1 resource failed: test-db');
+    expect(loggedMessages()).toContain('Region is required to create RDS client');
+  });
+});
+
+describe('cluster describe rejection', () => {
+  it.each([
+    { label: 'a string', thrown: 'denied', message: '1 resource failed: test-cluster' },
+    { label: 'null', thrown: null, message: '1 resource failed: test-cluster' },
+    { label: 'an object without a name', thrown: {}, message: '1 resource failed: test-cluster' },
+    { label: 'a non-string name', thrown: { name: 1 }, message: 'Checkpoint failed' },
+  ])('fails the resource when DescribeDBClusters throws $label', async ({ thrown, message }) => {
+    mockDiscoveredResources([clusterArn]);
+    rdsMock.on(DescribeDBClustersCommand).rejects(thrown as unknown as Error);
+
+    const { error } = await runToFailure(createEvent('Stop'));
+
+    expect(error.errorMessage).toContain(message);
+  });
+});
+
+describe('secret read failure', () => {
+  it('logs the stringified value when the secret read rejects with a non-Error', async () => {
+    (secretFetcher.getSecretValue as jest.Mock).mockRejectedValueOnce('secret-down');
+
+    await runToFailure(createEvent('Start'));
+
+    expect(loggedMessages()).toContain(`${LOG_MARKER_SCHEDULE_EXECUTION_FAILED}: secret-down`);
+  });
+});
