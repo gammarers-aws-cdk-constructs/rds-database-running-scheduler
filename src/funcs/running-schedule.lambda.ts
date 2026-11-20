@@ -1,4 +1,5 @@
 import {
+  BatchItemStatus,
   type DurableContext,
   withDurableExecution,
 } from '@aws/durable-execution-sdk-js';
@@ -43,6 +44,15 @@ import {
   RdsDatabaseRunningSchedulerValidateError,
 } from './core/running-schedule-errors';
 import {
+  hasMapFailure,
+  MAP_COMPLETION,
+  mapCompletionConfig,
+  mapFailureMessage,
+  mapItemOutcomes,
+  type ObservedMapItemState,
+} from './core/running-schedule-map';
+import { stopSkipReason } from './core/running-schedule-stop-skip';
+import {
   collectClusterKeysFromArns,
   filterClusterMemberDbs,
   parseRdsArn,
@@ -51,9 +61,9 @@ import {
   nextWaitStep,
   RESOURCE_STATUS,
   resolveResourceWait,
-  shouldContinueWaitLoop,
+  STOP_REQUEST,
   type ResolvedResourceWait,
-  type WaitLoopSignal,
+  type StopRequest,
 } from './core/running-schedule-wait';
 
 /**
@@ -70,6 +80,16 @@ const STATE_LIST = [
 const MAX_CONCURRENT_RESOURCES = 10;
 
 /**
+ * Batch status recorded for each map item.
+ * `STARTED` is an item the batch abandoned while it was still running.
+ */
+const MAP_ITEM_STATE: Record<BatchItemStatus, ObservedMapItemState> = {
+  [BatchItemStatus.FAILED]: 'failed',
+  [BatchItemStatus.STARTED]: 'started',
+  [BatchItemStatus.SUCCEEDED]: 'succeeded',
+};
+
+/**
  * Shared HTTP settings for every AWS SDK client in this handler.
  *
  * Retries stay with the SDK defaults. These limits keep one hung request from
@@ -81,6 +101,17 @@ const AWS_CLIENT_CONFIG = {
     requestTimeout: 30_000,
   },
 } as const;
+
+/**
+ * One Slack Web API request.
+ *
+ * The client default has no timeout and retries for about 30 minutes.
+ * Three attempts of 30 seconds, plus the short retry gaps, stay inside one Lambda invocation.
+ */
+const SLACK_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Extra attempts after the first Slack request. */
+const SLACK_RETRIES = 2;
 
 /**
  * Event payload for scheduled start/stop execution.
@@ -114,7 +145,7 @@ interface SlackSecret {
 interface ProcessingResult {
   /** Full ARN of the processed RDS resource. */
   resource: string;
-  /** Final RDS status, or `skipped` when the resource was not found. */
+  /** Final status: an RDS status, `skipped`, or `deferred`. */
   status: string;
   /** AWS account ID of the resource. */
   account: string;
@@ -124,6 +155,11 @@ interface ProcessingResult {
   identifier: string;
   /** Resource kind: standalone DB instance or cluster. */
   type: 'db' | 'cluster';
+  /**
+   * Why a stop was skipped or deferred.
+   * Absent when the cluster no longer exists, and when a start or stop completes.
+   */
+  reason?: string;
 }
 
 /**
@@ -253,16 +289,10 @@ const getStateDisplay = (current: string): { emoji: string; name: string } | und
  * @returns The error name when it is a string, otherwise an empty string.
  */
 const readErrorName = (err: unknown): string => {
-  if (typeof err !== 'object' || err === null) {
-    return '';
+  if (typeof err === 'object' && err !== null && 'name' in err && typeof err.name === 'string') {
+    return err.name;
   }
-  if (!('name' in err)) {
-    return '';
-  }
-  if (typeof err.name !== 'string') {
-    return '';
-  }
-  return err.name;
+  return '';
 };
 
 /**
@@ -279,6 +309,20 @@ const readErrorMessage = (err: unknown): string => {
 };
 
 /**
+ * Whether a wait-timeout Slack notice is posted.
+ * A boolean is not used, so the two cases stay explicit.
+ */
+const WAIT_TIMEOUT_NOTICE = {
+  /** Post the timeout notice. */
+  ENABLED: 'enabled',
+  /** Leave the timeout unposted. */
+  DISABLED: 'disabled',
+} as const;
+
+/** Whether a wait-timeout Slack notice is posted. */
+type WaitTimeoutNoticeState = typeof WAIT_TIMEOUT_NOTICE[keyof typeof WAIT_TIMEOUT_NOTICE];
+
+/**
  * Slack settings for the wait-timeout notice of one resource.
  */
 interface WaitTimeoutNotice {
@@ -288,8 +332,8 @@ interface WaitTimeoutNotice {
   channel: string | undefined;
   /** Parent message timestamp the notice replies to. */
   threadTs: string | undefined;
-  /** Whether `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is on. */
-  enabled: boolean;
+  /** Whether `NOTIFY_SLACK_ON_WAIT_TIMEOUT` asks for a timeout notice. */
+  state: WaitTimeoutNoticeState;
   /** Maximum wait seconds reported in the notice. */
   maxSeconds: number;
 }
@@ -320,12 +364,12 @@ const reportResourceFailure = async (
   }
   context.logger.error(`${LOG_MARKER_RESOURCE_WAIT_TIMED_OUT}: ${err.message}`);
   const { client, channel } = notice;
-  if (!client || !channel || !notice.enabled) {
+  if (!client || !channel || notice.state === WAIT_TIMEOUT_NOTICE.DISABLED) {
     return;
   }
   const target = parseRdsArn(targetResource);
   await context.step('post-slack-timeout-message', async () => {
-    return client.chat.postMessage({
+    await client.chat.postMessage({
       channel,
       thread_ts: notice.threadTs,
       attachments: [
@@ -348,6 +392,94 @@ const reportResourceFailure = async (
 };
 
 /**
+ * Attributes from Describe that the stop-skip decision needs.
+ * The step stores only these fields.
+ */
+interface DescribedResource {
+  /** Current RDS status, or `not-found` when a cluster is gone. */
+  readonly current: string;
+  /** `Engine` from Describe. */
+  readonly engine: string | undefined;
+  /** `EngineMode` from DescribeDBClusters. */
+  readonly engineMode: string | undefined;
+  /** `GlobalClusterIdentifier` when the cluster belongs to a global database. */
+  readonly globalClusterIdentifier: string | undefined;
+  /** `ReadReplicaIdentifiers` of the cluster. Empty for a DB instance. */
+  readonly readReplicaIdentifiers: readonly string[];
+  /** `IsClusterWriter` of each cluster member. Empty for a DB instance. */
+  readonly memberWriters: readonly boolean[];
+}
+
+/**
+ * Describes a resource that has no stop-skip attributes.
+ *
+ * @param current Status to report, including `not-found`.
+ * @returns Attributes that do not select a stop skip.
+ */
+const undescribedResource = (current: string): DescribedResource => ({
+  current,
+  engine: undefined,
+  engineMode: undefined,
+  globalClusterIdentifier: undefined,
+  readReplicaIdentifiers: [],
+  memberWriters: [],
+});
+
+/**
+ * Reads the status and the attributes that decide whether stop would be rejected.
+ *
+ * @param rds Regional RDS client for the resource.
+ * @param type Resource kind from the ARN.
+ * @param identifier DB instance or cluster identifier.
+ * @returns The current status and the stop-skip attributes.
+ * @throws {Error} When a DB instance is not found.
+ */
+const describeTarget = async (
+  rds: RDSClient,
+  type: 'db' | 'cluster',
+  identifier: string,
+): Promise<DescribedResource> => {
+  if (type === 'db') {
+    const res = await rds.send(new DescribeDBInstancesCommand({ DBInstanceIdentifier: identifier }));
+    const instance = res.DBInstances?.[0];
+    const current = instance?.DBInstanceStatus;
+    if (current == null) {
+      throw new Error(`DB instance not found: ${identifier}`);
+    }
+    return {
+      current,
+      engine: instance?.Engine,
+      engineMode: undefined,
+      globalClusterIdentifier: undefined,
+      readReplicaIdentifiers: [],
+      memberWriters: [],
+    };
+  }
+  try {
+    const res = await rds.send(new DescribeDBClustersCommand({ DBClusterIdentifier: identifier }));
+    const cluster = res.DBClusters?.[0];
+    const current = cluster?.Status;
+    if (current == null) {
+      return undescribedResource(RESOURCE_STATUS.NOT_FOUND);
+    }
+    return {
+      current,
+      engine: cluster?.Engine,
+      engineMode: cluster?.EngineMode,
+      globalClusterIdentifier: cluster?.GlobalClusterIdentifier,
+      readReplicaIdentifiers: cluster?.ReadReplicaIdentifiers ?? [],
+      memberWriters: (cluster?.DBClusterMembers ?? []).map((member) => member.IsClusterWriter === true),
+    };
+  } catch (err: unknown) {
+    const code = readErrorName(err);
+    if (code === 'DBClusterNotFoundFault' || code === 'DbClusterNotFoundException') {
+      return undescribedResource(RESOURCE_STATUS.NOT_FOUND);
+    }
+    throw err;
+  }
+};
+
+/**
  * Processes one RDS resource until it reaches a stable state or the wait budget is spent.
  *
  * The function checks status, triggers start/stop when needed, and waits while
@@ -355,7 +487,10 @@ const reportResourceFailure = async (
  * stop, plus `configuring-iam-database-auth` and `configuring-log-exports`.
  * A start that sees `storage-optimization` waits until the status is `stopped`,
  * then starts the resource. Each wait uses `intervalSeconds`. Accumulated
- * waits stop at `maxSeconds`. Uses a region-specific RDS client derived from
+ * waits stop at `maxSeconds`. A stop of RDS Custom, Aurora Serverless v1, or a
+ * global database cluster the stop API rejects returns `skipped` with a reason
+ * and does not call stop. A stop that sees `backing-up` before stop is called
+ * returns `deferred` and leaves the stop for the next schedule. Uses a region-specific RDS client derived from
  * the target ARN so resources outside the Lambda deployment region are handled
  * correctly.
  *
@@ -363,7 +498,7 @@ const reportResourceFailure = async (
  * @param targetResource Target RDS resource ARN after cluster-priority deduplication.
  * @param mode Requested operation mode.
  * @param waitSettings Validated interval and maximum wait for this resource.
- * @returns Final processing result including status and resource metadata.
+ * @returns Final processing result, including a reason when a stop is skipped or deferred.
  * @throws {RdsDatabaseRunningSchedulerStatusError} When the resource reaches an unexpected status.
  * @throws {RdsDatabaseRunningSchedulerTimeoutError} When the wait budget is exhausted.
  * @throws {Error} When a DB instance is not found.
@@ -380,46 +515,46 @@ const processing = async (
   const { intervalSeconds, maxSeconds } = waitSettings;
   let iteration = 0;
   let elapsedWaitSeconds = 0;
-  let signal: WaitLoopSignal = 'open';
-  let outcome: ProcessingResult | undefined;
+  let stopRequest: StopRequest = STOP_REQUEST.NOT_SENT;
 
-  const toResult = (status: string): ProcessingResult => ({
-    resource: targetResource,
-    status,
-    account: target.account,
-    region: target.region,
-    identifier: target.identifier,
-    type: target.type,
-  });
+  const toResult = (status: string, reason?: string): ProcessingResult => {
+    const result: ProcessingResult = {
+      resource: targetResource,
+      status,
+      account: target.account,
+      region: target.region,
+      identifier: target.identifier,
+      type: target.type,
+    };
+    if (reason === undefined) {
+      return result;
+    }
+    return { ...result, reason };
+  };
 
   // Check status at least once. Continue only while the resource still needs a
   // start, stop, or transition wait and the budget covers another interval.
   do {
     const stepName = `describe-${target.type}-${target.identifier}-${iteration}`;
     const statusResult = await context.step(stepName, async () => {
-      if (target.type === 'db') {
-        const res = await rds.send(new DescribeDBInstancesCommand({ DBInstanceIdentifier: target.identifier }));
-        const current = res.DBInstances?.[0]?.DBInstanceStatus;
-        if (current == null) {
-          throw new Error(`DB instance not found: ${target.identifier}`);
-        }
-        return { current, type: target.type, identifier: target.identifier };
-      }
-      try {
-        const res = await rds.send(new DescribeDBClustersCommand({ DBClusterIdentifier: target.identifier }));
-        const current = res.DBClusters?.[0]?.Status;
-        if (current == null) {
-          return { current: RESOURCE_STATUS.NOT_FOUND, type: target.type, identifier: target.identifier };
-        }
-        return { current, type: target.type, identifier: target.identifier };
-      } catch (err: unknown) {
-        const code = readErrorName(err);
-        if (code === 'DBClusterNotFoundFault' || code === 'DbClusterNotFoundException') {
-          return { current: RESOURCE_STATUS.NOT_FOUND, type: target.type, identifier: target.identifier };
-        }
-        throw err;
-      }
+      return describeTarget(rds, target.type, target.identifier);
     });
+
+    if (statusResult.current !== RESOURCE_STATUS.NOT_FOUND) {
+      const reason = stopSkipReason({
+        mode,
+        type: target.type,
+        identifier: target.identifier,
+        engine: statusResult.engine,
+        engineMode: statusResult.engineMode,
+        globalClusterIdentifier: statusResult.globalClusterIdentifier,
+        readReplicaIdentifiers: statusResult.readReplicaIdentifiers,
+        memberWriters: statusResult.memberWriters,
+      });
+      if (reason !== undefined) {
+        return toResult('skipped', reason);
+      }
+    }
 
     const step = nextWaitStep({
       mode,
@@ -428,11 +563,13 @@ const processing = async (
       intervalSeconds,
       maxWaitSeconds: maxSeconds,
       resourceLabel: `type=${target.type} identifier=${target.identifier}`,
+      type: target.type,
+      identifier: target.identifier,
+      stopRequest,
     });
 
     if (step.kind === 'finish') {
-      signal = 'settled';
-      outcome = toResult(step.status);
+      return toResult(step.status, step.reason);
     }
     // Step and wait names carry the iteration so each attempt stays unique across replays.
     if (step.kind === 'pause' && step.command === 'start' && target.type === 'db') {
@@ -455,18 +592,16 @@ const processing = async (
         await rds.send(new StopDBClusterCommand({ DBClusterIdentifier: target.identifier }));
       });
     }
+    if (step.kind === 'pause' && step.command === 'stop') {
+      stopRequest = STOP_REQUEST.SENT;
+    }
     if (step.kind === 'pause') {
       await context.wait(`wait-${target.type}-${target.identifier}-${iteration}`, { seconds: intervalSeconds });
       elapsedWaitSeconds += intervalSeconds;
     }
 
     iteration += 1;
-  } while (shouldContinueWaitLoop(signal));
-
-  if (outcome === undefined) {
-    throw new Error(`wait loop ended without a result: type=${target.type} identifier=${target.identifier}`);
-  }
-  return outcome;
+  } while (true);
 };
 
 /**
@@ -485,19 +620,29 @@ const processing = async (
  *
  * When `SLACK_SECRET_NAME` is set (by the CDK construct when `notification.slack.enable`
  * is `ENABLED`), fetches the Slack secret through the AWS Parameters and Secrets Lambda
- * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. When unset or empty,
- * Slack notification steps are skipped. Requires a Lambda runtime with
- * `AWS_SESSION_TOKEN` and the Params and Secrets extension layer (attached by the
- * construct when Slack is enabled).
+ * Extension (`aws-lambda-secret-fetcher`) and posts progress/results. A binary secret
+ * fails the run. The secret is read outside a durable step, so the token and channel
+ * are not stored in the execution history.
+ * The parent Slack step stores only the message timestamp. Result and timeout posts store
+ * nothing. When the secret name is unset or empty, Slack notification steps are skipped.
+ * Requires a Lambda runtime with `AWS_SESSION_TOKEN` and the Params and Secrets extension
+ * layer (attached by the construct when Slack is enabled).
  *
  * `WAIT_INTERVAL_SECONDS` and `MAX_WAIT_SECONDS` control the per-resource status
  * check. When a resource exceeds the maximum, the handler posts a Slack timeout
  * message only when Slack is configured and `NOTIFY_SLACK_ON_WAIT_TIMEOUT` is true,
  * and logs the failure with a marker for the failure-detection alarms.
  *
- * A failed resource does not stop the others. After every resource was attempted,
- * the first failure is rethrown so the execution fails. The durable SDK wraps that
- * error (for example in a `ChildContextError`) and keeps its message.
+ * A failed resource does not stop the others. The map runs every resource, including
+ * Slack notices for the ones that finish. After that, a failure of any resource fails
+ * the execution. The error names up to 10 failed resources. The log lists every failed
+ * resource and its error message.
+ *
+ * A stop of RDS Custom, Aurora Serverless v1, or an Aurora global database cluster
+ * the stop API rejects is skipped with a reason and does not fail the run.
+ * A stop that sees `backing-up` before stop is called is deferred to the next
+ * stop schedule, with a reason, and does not fail the run. A start still waits
+ * through `backing-up` and still runs those configurations.
  *
  * @param event Scheduler event payload containing tag filters and operation mode.
  * @param context Durable execution context from the durable execution SDK.
@@ -507,10 +652,11 @@ const processing = async (
  * settings are not positive integers within the allowed maximum, when
  * `TARGET_REGIONS` is not a JSON array of distinct region names, or when it names
  * a region that is not enabled for the account.
- * @throws {Error} When a resource times out ({@link RdsDatabaseRunningSchedulerTimeoutError}),
- * reaches an unexpected status ({@link RdsDatabaseRunningSchedulerStatusError}), or fails
- * for another reason, such as a missing DB instance.
- * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank, or secret fetch fails.
+ * @throws {Error} When any resource times out, reaches an unexpected status, or fails
+ * for another reason, such as a missing DB instance. The message names the failed
+ * resources. The per-resource error is written to the log before this throw.
+ * @throws {Error} When Slack is enabled but `AWS_SESSION_TOKEN` is missing/blank,
+ * secret fetch fails, or the Slack secret is binary.
  */
 const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   const params = event.Params;
@@ -528,7 +674,9 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
     'NOTIFY_SLACK_ON_WAIT_TIMEOUT',
     StrictEnvType.Boolean,
     { default: false },
-  );
+  )
+    ? WAIT_TIMEOUT_NOTICE.ENABLED
+    : WAIT_TIMEOUT_NOTICE.DISABLED;
   const slackSecretName = StrictEnvResolver.resolve('SLACK_SECRET_NAME', StrictEnvType.String, { default: '' });
   const requestedRegions = parseTargetRegions(
     StrictEnvResolver.resolve('TARGET_REGIONS', StrictEnvType.String, { default: '[]' }),
@@ -537,10 +685,17 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   let slackClient: WebClient | undefined;
   let slackChannel: string | undefined;
   if (slackSecretName) {
-    const slackSecretValue = await context.step('fetch-slack-secret', async () => {
-      return secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
+    const slackSecretValue = await secretFetcher.getSecretValue<SlackSecret>(slackSecretName);
+    // A binary secret has no token or channel. Fail before a durable step can record it.
+    if (slackSecretValue instanceof Uint8Array) {
+      throw new Error(`Slack secret ${slackSecretName} is binary`);
+    }
+    // The name stays so an in-flight replay still matches. The secret read above is not a step result.
+    await context.step('fetch-slack-secret', async () => undefined);
+    slackClient = new WebClient(slackSecretValue.token, {
+      timeout: SLACK_REQUEST_TIMEOUT_MS,
+      retryConfig: { retries: SLACK_RETRIES },
     });
-    slackClient = new WebClient(slackSecretValue.token);
     slackChannel = slackSecretValue.channel;
   }
 
@@ -569,16 +724,20 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
   if (slackClient && slackChannel) {
     const client = slackClient;
     const channel = slackChannel;
-    const slackParentMessageResult = await context.step('post-slack-messages', async () => {
-      return client.chat.postMessage({
+    slackParentMessageTs = await context.step('post-slack-messages', async () => {
+      const posted = await client.chat.postMessage({
         channel,
         text: `${params.Mode === RUNNING_MODE_START ? '😆 Starts' : '🥱 Stops'} the scheduled RDS Database or Cluster.`,
       });
+      return posted.ts;
     });
-    slackParentMessageTs = slackParentMessageResult?.ts;
   }
 
+  // `continue` waits for every resource. One failure still lets the others
+  // start or stop, and post Slack, before the execution itself fails.
+  const completionConfig = mapCompletionConfig(MAP_COMPLETION.CONTINUE);
   const results = await context.map(
+    'process-resources',
     targetResources,
     async (ctx: DurableContext, targetResource: string, index: number) => {
       return ctx.runInChildContext(`resource-${index}`, async (childCtx: DurableContext) => {
@@ -590,12 +749,12 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
             client: slackClient,
             channel: slackChannel,
             threadTs: slackParentMessageTs,
-            enabled: notifySlackOnWaitTimeout,
+            state: notifySlackOnWaitTimeout,
             maxSeconds: resourceWait.maxSeconds,
           });
           throw err;
         }
-        if (result.status === 'skipped') {
+        if (result.status === 'skipped' && result.reason === undefined) {
           return result;
         }
         if (!slackClient || !slackChannel) {
@@ -603,10 +762,36 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
         }
         const client = slackClient;
         const channel = slackChannel;
+        if (result.reason !== undefined) {
+          const reason = result.reason;
+          const statusLabel = result.status === 'deferred' ? 'DEFERRED' : 'SKIPPED';
+          // A skipped or deferred stop is not a failure, so the thread uses a warning color.
+          await childCtx.step('post-slack-child-messages', async () => {
+            await client.chat.postMessage({
+              channel,
+              thread_ts: slackParentMessageTs,
+              attachments: [
+                {
+                  color: '#ecb22e',
+                  pretext: reason,
+                  fields: [
+                    { title: 'Account', value: result.account, short: true },
+                    { title: 'Region', value: result.region, short: true },
+                    { title: 'Type', value: result.type, short: true },
+                    { title: 'Identifier', value: result.identifier, short: true },
+                    { title: 'Status', value: statusLabel, short: true },
+                    { title: 'Reason', value: reason, short: false },
+                  ],
+                },
+              ],
+            });
+          });
+          return result;
+        }
         await childCtx.step('post-slack-child-messages', async () => {
           const display = getStateDisplay(result.status);
 
-          return client.chat.postMessage({
+          await client.chat.postMessage({
             channel,
             thread_ts: slackParentMessageTs,
             attachments: [
@@ -628,12 +813,28 @@ const runSchedule = async (event: ScheduleEvent, context: DurableContext) => {
         return result;
       });
     },
-    { maxConcurrency: MAX_CONCURRENT_RESOURCES },
+    {
+      maxConcurrency: MAX_CONCURRENT_RESOURCES,
+      completionConfig,
+    },
   );
 
-  // `context.map` records each failed resource instead of throwing, so rethrow
-  // the first failure to fail the execution after every resource was attempted.
-  results.throwIfError();
+  const outcomes = mapItemOutcomes(
+    targetResources.map((arn) => parseRdsArn(arn).identifier),
+    results.all.map((item) => ({
+      index: item.index,
+      state: MAP_ITEM_STATE[item.status],
+    })),
+  );
+  if (hasMapFailure(outcomes)) {
+    context.logger.error('resource failures', {
+      resources: results.failed().map((item) => ({
+        name: parseRdsArn(targetResources[item.index]).identifier,
+        message: item.error.message,
+      })),
+    });
+    throw new Error(mapFailureMessage(outcomes));
+  }
 
   return { processed: results.totalCount, results: results.getResults() };
 };

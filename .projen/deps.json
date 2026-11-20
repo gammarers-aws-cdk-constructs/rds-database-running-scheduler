@@ -32,12 +32,12 @@
     },
     {
       "name": "@aws/durable-execution-sdk-js",
-      "version": "^2.7.1",
+      "version": "^3.1.0",
       "type": "build"
     },
     {
       "name": "@gammarers/projen-projects",
-      "version": "^0.5.1",
+      "version": "^0.8.1",
       "type": "build"
     },
     {
@@ -76,17 +76,17 @@
     },
     {
       "name": "aws-lambda-secret-fetcher",
-      "version": "^0.6.2",
+      "version": "^0.10.1",
       "type": "build"
     },
     {
       "name": "aws-sdk-client-mock-jest",
-      "version": "^2.2.0",
+      "version": "^4.1.0",
       "type": "build"
     },
     {
       "name": "aws-sdk-client-mock",
-      "version": "^2.2.0",
+      "version": "^4.1.0",
       "type": "build"
     },
     {
@@ -149,7 +149,7 @@
     },
     {
       "name": "strict-env-resolver",
-      "version": "^0.5.2",
+      "version": "^0.9.1",
       "type": "build"
     },
     {

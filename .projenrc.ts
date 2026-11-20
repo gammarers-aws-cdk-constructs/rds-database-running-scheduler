@@ -1,5 +1,4 @@
 import { ProjenCdkConstructLibrary } from '@gammarers/projen-projects';
-import { awscdk } from 'projen';
 const project = new ProjenCdkConstructLibrary({
   cdkVersion: '2.232.0',
   name: 'rds-database-running-scheduler',
@@ -19,8 +18,8 @@ const project = new ProjenCdkConstructLibrary({
     'lambda-failure-detector@^0.2.1',
   ],
   devDeps: [
-    '@gammarers/projen-projects@^0.5.1',
-    '@aws/durable-execution-sdk-js@^2.7.1',
+    '@gammarers/projen-projects@^0.8.1',
+    '@aws/durable-execution-sdk-js@^3.1.0',
     '@aws/durable-execution-sdk-js-testing@^1.3.2',
     '@aws-sdk/client-cost-explorer@^3.1087.0',
     '@aws-sdk/client-ec2@^3.1087.0',
@@ -29,29 +28,12 @@ const project = new ProjenCdkConstructLibrary({
     '@aws-sdk/client-resource-groups-tagging-api@^3.1087.0',
     '@slack/web-api@^6.13.0',
     '@types/aws-lambda@^8.10.162',
-    'aws-lambda-secret-fetcher@^0.6.2',
-    'aws-sdk-client-mock@^2.2.0',
-    'aws-sdk-client-mock-jest@^2.2.0',
-    'strict-env-resolver@^0.5.2',
+    'aws-lambda-secret-fetcher@^0.10.1',
+    'aws-sdk-client-mock@^4.1.0',
+    'aws-sdk-client-mock-jest@^4.1.0',
+    'strict-env-resolver@^0.9.1',
   ],
   releaseToNpm: true,
   npmTrustedPublishing: true,
-  jestOptions: {
-    extraCliOptions: ['--silent'],
-  },
-  tsconfigDev: {
-    compilerOptions: {
-      strict: true,
-    },
-  },
-  lambdaOptions: {
-    // target node.js runtime
-    runtime: awscdk.LambdaRuntime.NODEJS_24_X,
-    bundlingOptions: {
-      // list of node modules to exclude from the bundle
-      externals: ['@aws-sdk/*'],
-      sourcemap: true,
-    },
-  },
 });
 project.synth();
