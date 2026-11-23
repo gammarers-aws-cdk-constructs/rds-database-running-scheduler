@@ -4,6 +4,8 @@
 
 ### RDSDatabaseRunningScheduler <a name="RDSDatabaseRunningScheduler" id="rds-database-running-scheduler.RDSDatabaseRunningScheduler"></a>
 
+- *Implements:* constructs.IConstruct, constructs.IDependable
+
 CDK construct that provisions a durable Lambda workflow and EventBridge schedules to start/stop tagged RDS databases and clusters.
 
 The Lambda lists the regions enabled for the account and searches each one
@@ -183,6 +185,8 @@ Undefined unless `failureDetection.enabled` is `true`.
 
 
 ### RDSDatabaseRunningScheduleStack <a name="RDSDatabaseRunningScheduleStack" id="rds-database-running-scheduler.RDSDatabaseRunningScheduleStack"></a>
+
+- *Implements:* constructs.IConstruct, constructs.IDependable, aws-cdk-lib.ITaggable
 
 CDK stack that provisions scheduled start/stop control for tagged RDS resources in the enabled regions of the deployment account, or only in `targetRegions`.
 
